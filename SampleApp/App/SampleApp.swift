@@ -194,28 +194,13 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
 }
 
 
-// Improved raycast helper using actual model bounds
+// Raycast helper using sphere intersection
 private func raycastToModel(using ray: Ray3D, renderer: VisionSceneRenderer) -> Point3D? {
-    guard let splatRenderer = renderer.modelRenderer as? SplatRenderer else {
-        // Fallback for non-splat models
-        return raycastToModelSphere(using: ray, modelPosition: renderer.modelPosition, radius: 1.0)
-    }
-
-    // Use actual model bounds for hit detection
-    let origin = ray.origin.simd3
-    let direction = simd_normalize(ray.direction.simd3)
-
-    // Model bounds in world space (accounting for position and centering offset)
     let modelCenter = renderer.modelPosition + renderer.modelOffset
-    let halfSize = splatRenderer.modelSize * 0.5
-
-    // Axis-aligned bounding box intersection
-    return rayIntersectsAABB(origin: origin, direction: direction,
-                           boxMin: modelCenter - halfSize,
-                           boxMax: modelCenter + halfSize)
+    return raycastToModelSphere(using: ray, modelPosition: modelCenter, radius: 1.0)
 }
 
-// Fallback sphere intersection for non-splat models
+// Sphere intersection for raycast hit detection
 private func raycastToModelSphere(using ray: Ray3D, modelPosition: SIMD3<Float>, radius: Float) -> Point3D? {
     let origin = ray.origin.simd3
     let direction = simd_normalize(ray.direction.simd3)
@@ -231,38 +216,6 @@ private func raycastToModelSphere(using ray: Ray3D, modelPosition: SIMD3<Float>,
     return nil
 }
 
-// Ray-AABB intersection using slab method
-private func rayIntersectsAABB(origin: SIMD3<Float>, direction: SIMD3<Float>,
-                              boxMin: SIMD3<Float>, boxMax: SIMD3<Float>) -> Point3D? {
-    var tMin: Float = 0
-    var tMax: Float = Float.greatestFiniteMagnitude
-
-    for i in 0..<3 {
-        let invD = 1.0 / direction[i]
-        var t0 = (boxMin[i] - origin[i]) * invD
-        var t1 = (boxMax[i] - origin[i]) * invD
-
-        if invD < 0 {
-            swap(&t0, &t1)
-        }
-
-        tMin = max(tMin, t0)
-        tMax = min(tMax, t1)
-
-        if tMax <= tMin {
-            return nil // No intersection
-        }
-    }
-
-    // Find intersection point
-    let t = tMin > 0 ? tMin : tMax
-    if t > 0 {
-        let hitPoint = origin + t * direction
-        return Point3D(x: hitPoint.x, y: hitPoint.y, z: hitPoint.z)
-    }
-
-    return nil
-}
 
 private func handleTouchMovement(event: SpatialEventCollection.Event, locationSIMD: SIMD3<Float>, renderer: VisionSceneRenderer) {
     if renderer.isDragging, let startPos = renderer.dragStartPosition, let prevLoc = renderer.previousLocation {
