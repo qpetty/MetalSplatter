@@ -143,6 +143,12 @@ public class SplatRenderer {
     public var onSortStart: (() -> Void)?
     public var onSortComplete: ((TimeInterval) -> Void)?
 
+    // Model bounds for hit detection and centering
+    public private(set) var modelBounds: (min: SIMD3<Float>, max: SIMD3<Float>) = (.zero, .zero)
+    public var modelCenter: SIMD3<Float> { (modelBounds.min + modelBounds.max) * 0.5 }
+    public var modelSize: SIMD3<Float> { modelBounds.max - modelBounds.min }
+    public var modelRadius: Float { modelSize.max() * 0.5 }
+
     private let library: MTLLibrary
     // Single-stage pipeline
     private var singleStagePipelineState: MTLRenderPipelineState?
@@ -377,6 +383,9 @@ public class SplatRenderer {
         }
 
         splatBuffer.append(points.map { Splat($0) })
+
+        // Update bounds
+        updateBounds(with: points)
     }
 
     public func add(_ point: SplatScenePoint) throws {
@@ -618,6 +627,29 @@ public class SplatRenderer {
                 swap(&splatBuffer, &splatBufferPrime)
             } catch {
                 // TODO: report error
+            }
+        }
+    }
+
+    private func updateBounds(with points: [SplatScenePoint]) {
+        guard !points.isEmpty else { return }
+
+        if splatBuffer.count == points.count {
+            // First batch of points - initialize bounds
+            var minBound = SIMD3<Float>(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+            var maxBound = SIMD3<Float>(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+
+            for point in points {
+                minBound = min(minBound, point.position)
+                maxBound = max(maxBound, point.position)
+            }
+
+            modelBounds = (min: minBound, max: maxBound)
+        } else {
+            // Update existing bounds
+            for point in points {
+                modelBounds.min = min(modelBounds.min, point.position)
+                modelBounds.max = max(modelBounds.max, point.position)
             }
         }
     }

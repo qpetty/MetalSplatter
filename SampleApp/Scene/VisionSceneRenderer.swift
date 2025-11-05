@@ -41,9 +41,11 @@ class VisionSceneRenderer {
     
 //    var modelPosition = SIMD3<Float>(0.0, 0.0, Constants.modelCenterZ)
     var modelPosition = SIMD3<Float>(0.0, 0.0, -2)
+    var modelOffset = SIMD3<Float>.zero // Offset from model center to world position
     var dragStartPosition: SIMD3<Float>?
     var previousLocation: SIMD3<Float>?
     var initialHitPoint: Point3D?
+    var hitPointOffset: SIMD3<Float>? // Offset from model center to hit point
 
     init(_ layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
@@ -69,6 +71,12 @@ class VisionSceneRenderer {
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             try await splat.read(from: url)
             modelRenderer = splat
+
+            // Center the model in world space
+            if let splatRenderer = splat as? SplatRenderer {
+                modelOffset = -splatRenderer.modelCenter
+                modelPosition = SIMD3<Float>(0.0, 0.0, -2) // Keep initial position
+            }
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,
                                                    colorFormat: layerRenderer.configuration.colorFormat,
@@ -101,7 +109,9 @@ class VisionSceneRenderer {
         let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
                                                 axis: Constants.rotationAxis)
 //        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
-        let translationMatrix = matrix4x4_translation(modelPosition.x, modelPosition.y, modelPosition.z);
+        let worldTranslation = matrix4x4_translation(modelPosition.x, modelPosition.y, modelPosition.z);
+        let modelCentering = matrix4x4_translation(modelOffset.x, modelOffset.y, modelOffset.z);
+        let translationMatrix = worldTranslation * modelCentering;
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))

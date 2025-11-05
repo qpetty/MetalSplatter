@@ -2,6 +2,7 @@
 import CompositorServices
 #endif
 import SwiftUI
+import MetalSplatter
 
 @main
 struct SampleApp: App {
@@ -84,39 +85,43 @@ extension Vector3D {
 }
 
 private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD3<Float>, renderer: VisionSceneRenderer) {
-    let modelSIMD = renderer.modelPosition  // For distance calc
-    
     switch event.phase {
     case .active:
-        if !renderer.isDragging, let selectionRay = event.selectionRay {
-            let handToModelDistance = distance(modelSIMD, event.location3D)
+        if !renderer.isDragging {
+            // Check distance from hand to model center
+            let modelCenter = renderer.modelPosition + renderer.modelOffset
+            let handToModelDistance = distance(modelCenter, locationSIMD)
             print("Direct Pinch ACTIVE (start) - distance to model: \(handToModelDistance)m")
-            
-            let maxDistanceForInteraction: Float = 2.0
+
+            let maxDistanceForInteraction: Float = 3.0
             if handToModelDistance > maxDistanceForInteraction {
-                print("Ignoring event: too far (\(handToModelDistance)m)")
+                print("Ignoring direct pinch: too far (\(handToModelDistance)m)")
                 return
             }
-            
-            if handToModelDistance > 0.15 {
-                print("Direct pinch ignored: too far (\(handToModelDistance)m)")
-                return
-            }
-            
+
+            // For direct pinch, we'll treat the contact point as the center for simplicity
+            // Calculate offset from model center to contact point (approximated as model center)
+            let contactOffset = locationSIMD - modelCenter
+
             renderer.isDragging = true
             renderer.gestureJustStarted = true
-            renderer.dragStartPosition = modelSIMD
+            renderer.dragStartPosition = renderer.modelPosition
             renderer.previousLocation = locationSIMD
+            renderer.hitPointOffset = contactOffset
+            print("Direct Pinch START - Initial model pos: \(renderer.modelPosition), hand pos: \(locationSIMD)")
         } else {
-            // Update: Use hand pose (e.g., wrist joint) for delta
-            // Update with delta from location3D (hand movement)
-            guard let startPos = renderer.dragStartPosition,
-                  let prevLoc = renderer.previousLocation else { return }
-            
-            let delta = locationSIMD - prevLoc
-            let newPosition = startPos + delta
-            print("Direct Pinch ACTIVE (update) - Delta: \(delta), New pos: \(newPosition)")
-            
+            // Update: Move model so contact point follows hand position exactly
+            guard let hitPointOffset = renderer.hitPointOffset else { return }
+
+            let handPosition = locationSIMD
+
+            // The model center should be positioned so that: center + offset = hand_position
+            // Therefore: center = hand_position - offset
+            let newModelCenter = handPosition - hitPointOffset
+            let newPosition = newModelCenter - renderer.modelOffset
+
+            print("Direct Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newPosition)")
+
             renderer.modelPosition = newPosition
             renderer.previousLocation = locationSIMD
             renderer.gestureJustStarted = false
@@ -135,49 +140,53 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
 private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: VisionSceneRenderer) {
     switch event.phase {
     case .active:
-        if !renderer.isDragging, let selectionRay = event.selectionRay {
+        if !renderer.isDragging, let selectionRay = event.selectionRay, let inputDevicePose = event.inputDevicePose {
             // Start: Raycast selectionRay to find hit on model
-            guard let hitPoint = raycastToModel(using: selectionRay, modelPosition: renderer.modelPosition) else {
+            guard let hitPoint = raycastToModel(using: selectionRay, renderer: renderer) else {
                 print("Indirect Pinch ACTIVE (start) - No hit on model")
                 return
             }
-            let handToModelDistance = distance(renderer.modelPosition, hitPoint) // Or check ray origin distance
-            print("Indirect Pinch ACTIVE (start) - Hit point: \(hitPoint), distance to model: \(handToModelDistance)m")
-            
-            let maxDistanceForInteraction: Float = 2.0
-            if handToModelDistance > maxDistanceForInteraction {
-                print("Ignoring event: too far (\(handToModelDistance)m)")
+
+            // Check distance from hand to model for interaction limits
+            let handPosition = inputDevicePose.pose3D.position.simd3
+            let distanceToModel = distance(handPosition, renderer.modelPosition + renderer.modelOffset)
+            print("Indirect Pinch ACTIVE (start) - Hit point: \(hitPoint), distance to model: \(distanceToModel)m")
+
+            let maxDistanceForInteraction: Float = 3.0
+            if distanceToModel > maxDistanceForInteraction {
+                print("Ignoring event: too far (\(distanceToModel)m)")
                 return
             }
-            
+
+            // Calculate offset from model center to hit point for gaze-based manipulation
+            let modelCenter = renderer.modelPosition + renderer.modelOffset
+            let hitPointOffset = hitPoint.simd3 - modelCenter
+
             renderer.isDragging = true
             renderer.gestureJustStarted = true
-            renderer.dragStartPosition = renderer.modelPosition // Or offset from hit if needed
-            renderer.previousLocation = hitPoint.simd3 // Use hit as initial "location"
-            renderer.initialHitPoint = hitPoint // Store for reference
-        } else {
-            // Update: Use hand pose (e.g., wrist joint) for delta
-            guard let inputDevicePose = event.inputDevicePose,
-                  let startPos = renderer.dragStartPosition,
-                  let prevLoc = renderer.previousLocation else {
-                print("Indirect Pinch ACTIVE (update) - Missing inputDevicePose or prior data")
-                return
-            }
-            
-            let handPositionSIMD = inputDevicePose.pose3D.position.simd3
-            let delta = handPositionSIMD - prevLoc
-            let newPosition = startPos + delta
-            print("Indirect Pinch ACTIVE (update) - Hand pos: \(handPositionSIMD), Delta: \(delta), New pos: \(newPosition)")
-            
+            renderer.dragStartPosition = renderer.modelPosition
+            renderer.previousLocation = handPosition
+            renderer.initialHitPoint = hitPoint
+            renderer.hitPointOffset = hitPointOffset
+            print("Indirect Pinch START - Initial model pos: \(renderer.modelPosition), hit point: \(hitPoint), offset: \(hitPointOffset)")
+        } else if renderer.isDragging, let inputDevicePose = event.inputDevicePose,
+                  let hitPointOffset = renderer.hitPointOffset {
+            // Update: Move model so hit point follows hand position exactly
+            let handPosition = inputDevicePose.pose3D.position.simd3
+
+            // The model center should be positioned so that: center + offset = hand_position
+            // Therefore: center = hand_position - offset
+            let newModelCenter = handPosition - hitPointOffset
+            let newPosition = newModelCenter - renderer.modelOffset
+
+            print("Indirect Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newPosition)")
+
             renderer.modelPosition = newPosition
-            renderer.previousLocation = handPositionSIMD
+            renderer.previousLocation = handPosition
             renderer.gestureJustStarted = false
         }
     case .ended, .cancelled:
         print("Indirect Pinch ENDED/CANCELLED - Final pos: \(renderer.modelPosition)")
-        if event.phase == .cancelled && renderer.dragStartPosition != nil {
-            renderer.modelPosition = renderer.dragStartPosition!
-        }
         endDrag(renderer: renderer)
     @unknown default:
         break
@@ -185,23 +194,73 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
 }
 
 
-// Example raycast helper (implement in VisionSceneRenderer; simplistic bounding box for demo—use full ray-model intersection for accuracy)
-private func raycastToModel(using ray: Ray3D, modelPosition: SIMD3<Float>) -> Point3D? {
-    // Ray: origin (head pos) + direction (gaze vector)
+// Improved raycast helper using actual model bounds
+private func raycastToModel(using ray: Ray3D, renderer: VisionSceneRenderer) -> Point3D? {
+    guard let splatRenderer = renderer.modelRenderer as? SplatRenderer else {
+        // Fallback for non-splat models
+        return raycastToModelSphere(using: ray, modelPosition: renderer.modelPosition, radius: 1.0)
+    }
+
+    // Use actual model bounds for hit detection
     let origin = ray.origin.simd3
     let direction = simd_normalize(ray.direction.simd3)
-    
-    // Simple sphere/BBox check against model (expand with your model's actual geometry)
-    let modelRadius: Float = 1.0 // Tune to your model size
+
+    // Model bounds in world space (accounting for position and centering offset)
+    let modelCenter = renderer.modelPosition + renderer.modelOffset
+    let halfSize = splatRenderer.modelSize * 0.5
+
+    // Axis-aligned bounding box intersection
+    return rayIntersectsAABB(origin: origin, direction: direction,
+                           boxMin: modelCenter - halfSize,
+                           boxMax: modelCenter + halfSize)
+}
+
+// Fallback sphere intersection for non-splat models
+private func raycastToModelSphere(using ray: Ray3D, modelPosition: SIMD3<Float>, radius: Float) -> Point3D? {
+    let origin = ray.origin.simd3
+    let direction = simd_normalize(ray.direction.simd3)
     let modelCenter = modelPosition
     let oc = modelCenter - origin
     let t = simd_dot(oc, direction)
     let closest = origin + t * direction
     let distSq = simd_length_squared(closest - modelCenter)
-    
-    if distSq <= modelRadius * modelRadius {
+
+    if distSq <= radius * radius {
         return Point3D(x: closest.x, y: closest.y, z: closest.z)
     }
+    return nil
+}
+
+// Ray-AABB intersection using slab method
+private func rayIntersectsAABB(origin: SIMD3<Float>, direction: SIMD3<Float>,
+                              boxMin: SIMD3<Float>, boxMax: SIMD3<Float>) -> Point3D? {
+    var tMin: Float = 0
+    var tMax: Float = Float.greatestFiniteMagnitude
+
+    for i in 0..<3 {
+        let invD = 1.0 / direction[i]
+        var t0 = (boxMin[i] - origin[i]) * invD
+        var t1 = (boxMax[i] - origin[i]) * invD
+
+        if invD < 0 {
+            swap(&t0, &t1)
+        }
+
+        tMin = max(tMin, t0)
+        tMax = min(tMax, t1)
+
+        if tMax <= tMin {
+            return nil // No intersection
+        }
+    }
+
+    // Find intersection point
+    let t = tMin > 0 ? tMin : tMax
+    if t > 0 {
+        let hitPoint = origin + t * direction
+        return Point3D(x: hitPoint.x, y: hitPoint.y, z: hitPoint.z)
+    }
+
     return nil
 }
 
@@ -220,6 +279,8 @@ private func endDrag(renderer: VisionSceneRenderer) {
     renderer.gestureJustStarted = false
     renderer.dragStartPosition = nil
     renderer.previousLocation = nil
+    renderer.initialHitPoint = nil
+    renderer.hitPointOffset = nil
 }
 
 private func handleTouchMovement(event: SpatialEventCollection.Event, renderer: VisionSceneRenderer) {
