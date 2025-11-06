@@ -28,8 +28,6 @@ class VisionSceneRenderer {
     var model: ModelIdentifier?
     var modelRenderer: (any ModelRenderer)?
 
-    let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
-
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
 
@@ -145,51 +143,43 @@ class VisionSceneRenderer {
     func renderFrame() {
         guard let frame = layerRenderer.queryNextFrame() else { return }
 
+        guard let timing = frame.predictTiming() else { return }
+        
         frame.startUpdate()
+        updateRotation()
         frame.endUpdate()
 
-        guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
-
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            fatalError("Failed to create command buffer")
-        }
-
-        guard let drawable = frame.queryDrawable() else { return }
-
-        _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
-
+        
         frame.startSubmission()
 
-        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        let presentationTime = LayerRenderer.Clock.Instant.epoch.duration(to: timing.presentationTime).timeInterval
+        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: presentationTime)
 
-        drawable.deviceAnchor = deviceAnchor
+        for drawable in frame.queryDrawables() {
+            drawable.deviceAnchor = deviceAnchor
+            
+            let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
+            
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                fatalError("Failed to create command buffer")
+            }
+            
+            do {
+                try modelRenderer?.render(viewports: viewports,
+                                          colorTexture: drawable.colorTextures[0],
+                                          colorStoreAction: .store,
+                                          depthTexture: drawable.depthTextures[0],
+                                          rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                          renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                          to: commandBuffer)
+            } catch {
+                Self.log.error("Unable to render scene: \(error.localizedDescription)")
+            }
 
-        let semaphore = inFlightSemaphore
-        commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
-            semaphore.signal()
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
         }
-
-        updateRotation()
-
-        let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
-
-        do {
-            try modelRenderer?.render(viewports: viewports,
-                                      colorTexture: drawable.colorTextures[0],
-                                      colorStoreAction: .store,
-                                      depthTexture: drawable.depthTextures[0],
-                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
-                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
-                                      to: commandBuffer)
-        } catch {
-            Self.log.error("Unable to render scene: \(error.localizedDescription)")
-        }
-
-        drawable.encodePresent(commandBuffer: commandBuffer)
-
-        commandBuffer.commit()
 
         frame.endSubmission()
     }
