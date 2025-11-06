@@ -89,7 +89,7 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
     case .active:
         if !renderer.isDragging {
             // Check distance from hand to model center
-            let modelCenter = renderer.modelPosition + renderer.modelOffset
+            let modelCenter = renderer.modelPosition
             let handToModelDistance = distance(modelCenter, locationSIMD)
             print("Direct Pinch ACTIVE (start) - distance to model: \(handToModelDistance)m")
 
@@ -118,11 +118,10 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
             // The model center should be positioned so that: center + offset = hand_position
             // Therefore: center = hand_position - offset
             let newModelCenter = handPosition - hitPointOffset
-            let newPosition = newModelCenter - renderer.modelOffset
 
-            print("Direct Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newPosition)")
+            print("Direct Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newModelCenter)")
 
-            renderer.modelPosition = newPosition
+            renderer.modelPosition = newModelCenter
             renderer.previousLocation = locationSIMD
             renderer.gestureJustStarted = false
         }
@@ -149,18 +148,11 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
 
             // Check distance from hand to model for interaction limits
             let handPosition = inputDevicePose.pose3D.position.simd3
-            let distanceToModel = distance(handPosition, renderer.modelPosition + renderer.modelOffset)
+            let distanceToModel = distance(renderer.modelPosition, hitPoint)
             print("Indirect Pinch ACTIVE (start) - Hit point: \(hitPoint), distance to model: \(distanceToModel)m")
 
-            let maxDistanceForInteraction: Float = 3.0
-            if distanceToModel > maxDistanceForInteraction {
-                print("Ignoring event: too far (\(distanceToModel)m)")
-                return
-            }
-
             // Calculate offset from model center to hit point for gaze-based manipulation
-            let modelCenter = renderer.modelPosition + renderer.modelOffset
-            let hitPointOffset = hitPoint.simd3 - modelCenter
+            let hitPointOffset = hitPoint.simd3 - renderer.modelPosition
 
             renderer.isDragging = true
             renderer.gestureJustStarted = true
@@ -169,19 +161,17 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
             renderer.initialHitPoint = hitPoint
             renderer.hitPointOffset = hitPointOffset
             print("Indirect Pinch START - Initial model pos: \(renderer.modelPosition), hit point: \(hitPoint), offset: \(hitPointOffset)")
-        } else if renderer.isDragging, let inputDevicePose = event.inputDevicePose,
-                  let hitPointOffset = renderer.hitPointOffset {
+        } else if renderer.isDragging, let inputDevicePose = event.inputDevicePose, let previousLocation = renderer.previousLocation {
             // Update: Move model so hit point follows hand position exactly
             let handPosition = inputDevicePose.pose3D.position.simd3
 
             // The model center should be positioned so that: center + offset = hand_position
             // Therefore: center = hand_position - offset
-            let newModelCenter = handPosition - hitPointOffset
-            let newPosition = newModelCenter - renderer.modelOffset
+            let newModelCenter = handPosition - previousLocation + renderer.modelPosition
 
-            print("Indirect Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newPosition)")
+            print("Indirect Pinch UPDATE - Hand pos: \(handPosition), new model pos: \(newModelCenter)")
 
-            renderer.modelPosition = newPosition
+            renderer.modelPosition = newModelCenter
             renderer.previousLocation = handPosition
             renderer.gestureJustStarted = false
         }
