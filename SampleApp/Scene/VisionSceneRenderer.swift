@@ -40,6 +40,7 @@ class VisionSceneRenderer {
 //    var modelPosition = SIMD3<Float>(0.0, 0.0, Constants.modelCenterZ)
     var modelPosition = SIMD3<Float>(0.0, 0.0, -2)
     var modelOffset = SIMD3<Float>.zero // Offset from model center to world position
+    var modelRadius = 1.0 as Float
     var dragStartPosition: SIMD3<Float>?
     var previousLocation: SIMD3<Float>?
     var initialHitPoint: Point3D?
@@ -75,6 +76,9 @@ class VisionSceneRenderer {
                 modelOffset = -splatRenderer.modelCenter
                 modelPosition = SIMD3<Float>(0.0, 0.0, -2) // Keep initial position
             }
+            
+            modelRadius = splat.modelRadius
+            
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,
                                                    colorFormat: layerRenderer.configuration.colorFormat,
@@ -146,7 +150,7 @@ class VisionSceneRenderer {
         guard let timing = frame.predictTiming() else { return }
         
         frame.startUpdate()
-        updateRotation()
+//        updateRotation()
         frame.endUpdate()
 
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)

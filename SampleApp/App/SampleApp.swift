@@ -196,8 +196,7 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
 
 // Raycast helper using sphere intersection
 private func raycastToModel(using ray: Ray3D, renderer: VisionSceneRenderer) -> Point3D? {
-    let modelCenter = renderer.modelPosition + renderer.modelOffset
-    return raycastToModelSphere(using: ray, modelPosition: modelCenter, radius: 1.0)
+    return raycastToModelSphere(using: ray, modelPosition: renderer.modelPosition, radius: renderer.modelRadius)
 }
 
 // Sphere intersection for raycast hit detection
