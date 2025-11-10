@@ -72,6 +72,7 @@ struct SampleApp: App {
 #endif // os(visionOS)
 }
 
+#if os(visionOS)
 extension Point3D {
     var simd3: SIMD3<Float> {
         SIMD3<Float>(Float(x), Float(y), Float(z))
@@ -245,3 +246,4 @@ private func distance(_ a: SIMD3<Float>, _ b: Point3D) -> Float {
 private func distance(_ a: Point3D, _ b: Point3D) -> Float {
     simd_length(a.simd3 - b.simd3)
 }
+#endif // os(visionOS)

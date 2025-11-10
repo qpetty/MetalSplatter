@@ -73,6 +73,7 @@ class VisionSceneRenderer {
             // Center the model in world space
             if let splatRenderer = splat as? SplatRenderer {
                 modelPosition = SIMD3<Float>(0.0, 0.0, -2) // Keep initial position
+                print("splat count: \(splatRenderer.splatCount)")
             }
             
             modelRadius = splat.modelRadius
