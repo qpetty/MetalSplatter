@@ -26,6 +26,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     var rotation: Angle = .zero
 
     var drawableSize: CGSize = .zero
+    
+#if os(macOS)
+    var cameraController: CameraController?
+    var lastMovementUpdateTimestamp: Date? = nil
+#endif
 
     init?(_ metalKitView: MTKView) {
         self.device = metalKitView.device!
@@ -71,18 +76,33 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                              nearZ: 0.1,
                                                              farZ: 100.0)
 
-        let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
-                                                axis: Constants.rotationAxis)
-        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+
+        let viewMatrix: matrix_float4x4
+#if os(macOS)
+        if let cameraController = cameraController {
+            viewMatrix = cameraController.getViewMatrix(commonUpCalibration: commonUpCalibration)
+        } else {
+            // Fallback to auto-rotation if camera controller is not set
+            let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
+                                                    axis: Constants.rotationAxis)
+            let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
+            viewMatrix = translationMatrix * rotationMatrix * commonUpCalibration
+        }
+#else
+        let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
+                                                axis: Constants.rotationAxis)
+        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
+        viewMatrix = translationMatrix * rotationMatrix * commonUpCalibration
+#endif
 
         let viewport = MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1)
 
         return ModelRendererViewportDescriptor(viewport: viewport,
                                                projectionMatrix: projectionMatrix,
-                                               viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
+                                               viewMatrix: viewMatrix,
                                                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 
@@ -95,6 +115,31 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         guard let lastRotationUpdateTimestamp else { return }
         rotation += Constants.rotationPerSecond * now.timeIntervalSince(lastRotationUpdateTimestamp)
     }
+    
+#if os(macOS)
+    private func updateCameraMovement() {
+        guard let cameraController = cameraController else {
+            // Fallback to auto-rotation if camera controller is not set
+            updateRotation()
+            return
+        }
+        
+        let now = Date()
+        defer {
+            lastMovementUpdateTimestamp = now
+        }
+        
+        guard let lastMovementUpdateTimestamp = lastMovementUpdateTimestamp else {
+            return
+        }
+        
+        let deltaTime = now.timeIntervalSince(lastMovementUpdateTimestamp)
+        
+        // Get calibration to pass to movement update
+        let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        cameraController.updateMovement(deltaTime: deltaTime, commonUpCalibration: commonUpCalibration)
+    }
+#endif
 
     func draw(in view: MTKView) {
         guard let modelRenderer else { return }
@@ -112,7 +157,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             semaphore.signal()
         }
 
+#if os(macOS)
+        updateCameraMovement()
+#else
         updateRotation()
+#endif
 
         do {
             try modelRenderer.render(viewports: [viewport],
