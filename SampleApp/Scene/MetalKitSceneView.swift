@@ -11,6 +11,7 @@ private typealias ViewRepresentable = UIViewRepresentable
 
 struct MetalKitSceneView: ViewRepresentable {
     var modelIdentifier: ModelIdentifier?
+    @AppStorage("enableFileMonitoring") private var enableFileMonitoring = true
 
     class Coordinator {
         var renderer: MetalKitSceneRenderer?
@@ -47,6 +48,7 @@ struct MetalKitSceneView: ViewRepresentable {
         guard let renderer = MetalKitSceneRenderer(metalKitView) else {
             return metalKitView
         }
+        renderer.enableFileMonitoring = enableFileMonitoring
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
@@ -92,6 +94,7 @@ struct MetalKitSceneView: ViewRepresentable {
 
     private func updateView(_ coordinator: Coordinator) {
         guard let renderer = coordinator.renderer else { return }
+        renderer.enableFileMonitoring = enableFileMonitoring
         Task {
             do {
                 try await renderer.load(modelIdentifier)

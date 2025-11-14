@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var isPickingFile = false
+    @AppStorage("enableFileMonitoring") private var enableFileMonitoring = true
 
 #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -94,6 +95,14 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
 #if os(visionOS)
             .disabled(immersiveSpaceIsShown)
+#endif
+
+            Spacer()
+
+            Toggle("Enable File Monitoring", isOn: $enableFileMonitoring)
+                .padding()
+#if os(macOS)
+                .toggleStyle(.checkbox)
 #endif
 
             Spacer()

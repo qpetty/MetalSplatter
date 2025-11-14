@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS)
 
+import Darwin
 import Metal
 import MetalKit
 import MetalSplatter
@@ -19,8 +20,14 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
     var model: ModelIdentifier?
     var modelRenderer: (any ModelRenderer)?
+    var enableFileMonitoring: Bool = true
 
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
+    
+    // File monitoring for automatic reload
+    private var fileMonitorSource: DispatchSourceFileSystemObject?
+    private var fileMonitorDescriptor: Int32?
+    private var reloadWorkItem: DispatchWorkItem?
 
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
@@ -42,14 +49,86 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         metalKitView.sampleCount = 1
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
     }
+    
+    deinit {
+        tearDownFileMonitor()
+    }
 
-    func load(_ model: ModelIdentifier?) async throws {
-        guard model != self.model else { return }
-        self.model = model
-
-        modelRenderer = nil
-        switch model {
-        case .gaussianSplat(let url):
+    private func setupFileMonitor(for url: URL) {
+        // Tear down any existing monitor first
+        tearDownFileMonitor()
+        
+        // Open file descriptor for monitoring
+        let descriptor = open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            Self.log.error("Failed to open file descriptor for monitoring: \(url.path)")
+            return
+        }
+        
+        fileMonitorDescriptor = descriptor
+        
+        // Create dispatch source for file system events
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: .write,
+            queue: DispatchQueue.main
+        )
+        
+        fileMonitorSource = source
+        
+        // Set up event handler with debouncing
+        source.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            
+            // Cancel any pending reload
+            self.reloadWorkItem?.cancel()
+            
+            // Create new reload work item with 0.5s delay
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                Task {
+                    await self.reloadCurrentModel()
+                }
+            }
+            
+            self.reloadWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        }
+        
+        // Set up cancel handler to close file descriptor
+        source.setCancelHandler { [weak self] in
+            guard let self = self, let descriptor = self.fileMonitorDescriptor else { return }
+            close(descriptor)
+            self.fileMonitorDescriptor = nil
+        }
+        
+        // Start monitoring
+        source.resume()
+        
+        Self.log.info("Started file monitoring for: \(url.path)")
+    }
+    
+    private func tearDownFileMonitor() {
+        // Cancel pending reload
+        reloadWorkItem?.cancel()
+        reloadWorkItem = nil
+        
+        // Cancel and release dispatch source
+        fileMonitorSource?.cancel()
+        fileMonitorSource = nil
+        
+        // File descriptor will be closed by cancel handler
+    }
+    
+    private func reloadCurrentModel() async {
+        guard case .gaussianSplat(let url) = model else {
+            return
+        }
+        
+        Self.log.info("Reloading model from: \(url.path)")
+        
+        do {
+            // Create new splat renderer
             let splat = try await SplatRenderer(device: device,
                                                 colorFormat: metalKitView.colorPixelFormat,
                                                 depthFormat: metalKitView.depthStencilPixelFormat,
@@ -57,14 +136,66 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                 maxViewCount: 1,
                                                 maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             try await splat.read(from: url)
-            modelRenderer = splat
+            
+            // Only update if we still have the same model
+            if case .gaussianSplat(let currentUrl) = model, currentUrl == url {
+                modelRenderer = splat
+                Self.log.info("Successfully reloaded model from: \(url.path)")
+            }
+        } catch {
+            Self.log.error("Failed to reload model from \(url.path): \(error.localizedDescription)")
+            // Keep the old model renderer intact on error
+        }
+    }
+
+    func load(_ model: ModelIdentifier?) async throws {
+        let isModelChange = model != self.model
+        
+        if isModelChange {
+            // Tear down file monitor for previous model
+            tearDownFileMonitor()
+            self.model = model
+            modelRenderer = nil
+        }
+        
+        // Handle file monitoring preference changes for existing Gaussian splat models
+        if !isModelChange, case .gaussianSplat(let url) = model {
+            if enableFileMonitoring && fileMonitorSource == nil {
+                // Monitoring was enabled but not set up
+                setupFileMonitor(for: url)
+            } else if !enableFileMonitoring && fileMonitorSource != nil {
+                // Monitoring was disabled but still active
+                tearDownFileMonitor()
+            }
+        }
+
+        switch model {
+        case .gaussianSplat(let url):
+            if isModelChange {
+                let splat = try await SplatRenderer(device: device,
+                                                    colorFormat: metalKitView.colorPixelFormat,
+                                                    depthFormat: metalKitView.depthStencilPixelFormat,
+                                                    sampleCount: metalKitView.sampleCount,
+                                                    maxViewCount: 1,
+                                                    maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+                try await splat.read(from: url)
+                modelRenderer = splat
+                
+                // Set up file monitoring for Gaussian splat files if enabled
+                if enableFileMonitoring {
+                    setupFileMonitor(for: url)
+                }
+            }
         case .sampleBox:
-            modelRenderer = try! await SampleBoxRenderer(device: device,
-                                                         colorFormat: metalKitView.colorPixelFormat,
-                                                         depthFormat: metalKitView.depthStencilPixelFormat,
-                                                         sampleCount: metalKitView.sampleCount,
-                                                         maxViewCount: 1,
-                                                         maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            if isModelChange {
+                modelRenderer = try! await SampleBoxRenderer(device: device,
+                                                             colorFormat: metalKitView.colorPixelFormat,
+                                                             depthFormat: metalKitView.depthStencilPixelFormat,
+                                                             sampleCount: metalKitView.sampleCount,
+                                                             maxViewCount: 1,
+                                                             maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+                // No file monitoring for sample box
+            }
         case .none:
             break
         }
@@ -186,3 +317,4 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 }
 
 #endif // os(iOS) || os(macOS)
+
