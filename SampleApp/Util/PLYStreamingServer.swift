@@ -4,6 +4,22 @@ import Foundation
 import Network
 import os
 
+// Swift wrapper for SPZ C functions
+@_silgen_name("spz_load_spz_from_file")
+func spz_load_spz_from_file(_ filename: UnsafePointer<CChar>) -> UnsafeMutableRawPointer?
+
+@_silgen_name("spz_save_splat_to_ply")
+func spz_save_splat_to_ply(_ cloud: UnsafeMutableRawPointer?, _ options: UnsafeMutableRawPointer?, _ outputPath: UnsafePointer<CChar>) -> Bool
+
+@_silgen_name("spz_gaussian_cloud_destroy")
+func spz_gaussian_cloud_destroy(_ cloud: UnsafeMutableRawPointer?)
+
+@_silgen_name("spz_pack_options_create")
+func spz_pack_options_create() -> UnsafeMutableRawPointer?
+
+@_silgen_name("spz_pack_options_destroy")
+func spz_pack_options_destroy(_ options: UnsafeMutableRawPointer?)
+
 class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "PLYStreamingServer")
     
@@ -340,12 +356,14 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         let parts = splitMultipartData(data, boundary: boundaryData)
         
         var fileData: Data?
+        var filename: String?
         var captureID: String?
         
         for part in parts {
-            if let (partFileData, _, partCaptureID) = parseMultipartPart(part) {
+            if let (partFileData, partFilename, partCaptureID) = parseMultipartPart(part) {
                 if partFileData != nil {
                     fileData = partFileData
+                    filename = partFilename
                 }
                 if let id = partCaptureID {
                     captureID = id
@@ -366,18 +384,35 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             // Remove old file if it exists
             try? FileManager.default.removeItem(at: fileURL)
             
-            // Write new file
-            try fileData.write(to: fileURL)
-            Self.log.info("Received PLY file saved to: \(fileURL.path), capture_id: \(captureID ?? "none")")
+            // Check if the received file is an SPZ file
+            let isSPZFile = filename?.lowercased().hasSuffix(".spz") ?? false
             
-            Task { @MainActor in
-                self.lastReceivedFileURL = fileURL
-                self.lastCaptureID = captureID
-                self.onFileReceived?(fileURL, captureID)
+            if isSPZFile {
+                // Decompress SPZ file
+                if decompressSPZToPLY(spzData: fileData, outputURL: fileURL, captureID: captureID) {
+                    Task { @MainActor in
+                        self.lastReceivedFileURL = fileURL
+                        self.lastCaptureID = captureID
+                        self.onFileReceived?(fileURL, captureID)
+                    }
+                    sendSuccessResponse(connection, message: "SPZ file decompressed successfully")
+                } else {
+                    sendErrorResponse(connection, statusCode: 500, message: "Failed to decompress SPZ file")
+                }
+            } else {
+                // Regular PLY file, save as-is
+                try fileData.write(to: fileURL)
+                Self.log.info("Received PLY file saved to: \(fileURL.path), capture_id: \(captureID ?? "none")")
+                
+                Task { @MainActor in
+                    self.lastReceivedFileURL = fileURL
+                    self.lastCaptureID = captureID
+                    self.onFileReceived?(fileURL, captureID)
+                }
+                
+                // Send success response
+                sendSuccessResponse(connection, message: "File received successfully")
             }
-            
-            // Send success response
-            sendSuccessResponse(connection, message: "File received successfully")
         } catch {
             Self.log.error("Failed to save received file: \(error.localizedDescription)")
             sendErrorResponse(connection, statusCode: 500, message: "Failed to save file")
@@ -470,6 +505,65 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         }
         
         return nil
+    }
+    
+    nonisolated private func decompressSPZToPLY(spzData: Data, outputURL: URL, captureID: String?) -> Bool {
+        // Save SPZ file temporarily
+        let tempSPZURL = outputURL.deletingLastPathComponent().appendingPathComponent("temp_received.spz")
+        defer {
+            // Clean up temp SPZ file
+            try? FileManager.default.removeItem(at: tempSPZURL)
+        }
+        
+        do {
+            // Remove old temp file if it exists
+            try? FileManager.default.removeItem(at: tempSPZURL)
+            try spzData.write(to: tempSPZURL)
+        } catch {
+            Self.log.error("Failed to write temporary SPZ file: \(error.localizedDescription)")
+            return false
+        }
+        
+        Self.log.info("Received SPZ file, decompressing to PLY...")
+        
+        // Decompress SPZ to PLY
+        let spzPath = tempSPZURL.path
+        let plyPath = outputURL.path
+        
+        // Load SPZ file
+        let cloud: UnsafeMutableRawPointer? = spzPath.withCString { spzPathPtr in
+            return spz_load_spz_from_file(spzPathPtr)
+        }
+        
+        guard let cloud = cloud else {
+            Self.log.error("Failed to load SPZ file: \(spzPath)")
+            return false
+        }
+        
+        defer {
+            spz_gaussian_cloud_destroy(cloud)
+        }
+        
+        // Create pack options (optional, can be nil)
+        let options = spz_pack_options_create()
+        defer {
+            if let options = options {
+                spz_pack_options_destroy(options)
+            }
+        }
+        
+        // Save as PLY
+        let success = plyPath.withCString { plyPathPtr in
+            return spz_save_splat_to_ply(cloud, options, plyPathPtr)
+        }
+        
+        if success {
+            Self.log.info("SPZ file decompressed to PLY: \(plyPath), capture_id: \(captureID ?? "none")")
+            return true
+        } else {
+            Self.log.error("Failed to save decompressed PLY file")
+            return false
+        }
     }
     
     nonisolated private func sendSuccessResponse(_ connection: NWConnection, message: String) {

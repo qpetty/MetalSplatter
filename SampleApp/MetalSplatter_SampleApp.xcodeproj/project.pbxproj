@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5A72D4872ECE5232004C5D0E /* splat-c-types.cc in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D4832ECE5232004C5D0E /* splat-c-types.cc */; };
+		5A72D4882ECE5232004C5D0E /* load-spz.cc in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D4812ECE5232004C5D0E /* load-spz.cc */; };
+		5A72D4892ECE5232004C5D0E /* splat-types.cc in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D4852ECE5232004C5D0E /* splat-types.cc */; };
+		5A72D48B2ECE5290004C5D0E /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 5A72D48A2ECE5290004C5D0E /* libz.tbd */; };
+		5A72D48E2ECE5685004C5D0E /* spz_wrapper.cc in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D48D2ECE567D004C5D0E /* spz_wrapper.cc */; };
 		610347D92B46864500693CE3 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp.swift */; };
 		610347DA2B46874500693CE3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
 		610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */; };
@@ -30,6 +35,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5A72D4802ECE5232004C5D0E /* load-spz.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "load-spz.h"; sourceTree = "<group>"; };
+		5A72D4812ECE5232004C5D0E /* load-spz.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "load-spz.cc"; sourceTree = "<group>"; };
+		5A72D4822ECE5232004C5D0E /* splat-c-types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "splat-c-types.h"; sourceTree = "<group>"; };
+		5A72D4832ECE5232004C5D0E /* splat-c-types.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "splat-c-types.cc"; sourceTree = "<group>"; };
+		5A72D4842ECE5232004C5D0E /* splat-types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "splat-types.h"; sourceTree = "<group>"; };
+		5A72D4852ECE5232004C5D0E /* splat-types.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "splat-types.cc"; sourceTree = "<group>"; };
+		5A72D48A2ECE5290004C5D0E /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.1.sdk/usr/lib/libz.tbd; sourceTree = DEVELOPER_DIR; };
+		5A72D48C2ECE5581004C5D0E /* spz_wrapper.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = spz_wrapper.h; sourceTree = "<group>"; };
+		5A72D48D2ECE567D004C5D0E /* spz_wrapper.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = spz_wrapper.cc; sourceTree = "<group>"; };
 		610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStageConfiguration.swift; sourceTree = "<group>"; };
 		61791DC32B41514300302B57 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "SplatRenderer+ModelRenderer.swift"; sourceTree = "<group>"; };
@@ -56,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5A72D48B2ECE5290004C5D0E /* libz.tbd in Frameworks */,
 				617E50CB2B314C4800F99766 /* SplatIO in Frameworks */,
 				617E50C92B314C4800F99766 /* PLYIO in Frameworks */,
 				61791E002B415D3F00302B57 /* MetalSplatter in Frameworks */,
@@ -66,6 +81,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5A72D4862ECE5232004C5D0E /* cc */ = {
+			isa = PBXGroup;
+			children = (
+				5A72D4802ECE5232004C5D0E /* load-spz.h */,
+				5A72D4812ECE5232004C5D0E /* load-spz.cc */,
+				5A72D4822ECE5232004C5D0E /* splat-c-types.h */,
+				5A72D4832ECE5232004C5D0E /* splat-c-types.cc */,
+				5A72D4842ECE5232004C5D0E /* splat-types.h */,
+				5A72D4852ECE5232004C5D0E /* splat-types.cc */,
+			);
+			name = cc;
+			path = ../spz/src/cc;
+			sourceTree = SOURCE_ROOT;
+		};
 		610347DF2B4689DB00693CE3 /* Model */ = {
 			isa = PBXGroup;
 			children = (
@@ -112,6 +141,7 @@
 		619832682AF0BC390022500D /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				5A72D48A2ECE5290004C5D0E /* libz.tbd */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -124,6 +154,9 @@
 				610347E02B468A0000693CE3 /* Scene */,
 				610347DF2B4689DB00693CE3 /* Model */,
 				61791DF82B41551F00302B57 /* Info.plist */,
+				5A72D48C2ECE5581004C5D0E /* spz_wrapper.h */,
+				5A72D48D2ECE567D004C5D0E /* spz_wrapper.cc */,
+				5A72D4862ECE5232004C5D0E /* cc */,
 				61791DF92B41551F00302B59 /* MetalSplatter_SampleApp.entitlements */,
 				61791DC32B41514300302B57 /* Assets.xcassets */,
 				61E3FD832AE5CB0200032652 /* Products */,
@@ -219,12 +252,16 @@
 				61791DE22B4154FB00302B57 /* ModelIdentifier.swift in Sources */,
 				610347DA2B46874500693CE3 /* ContentView.swift in Sources */,
 				61791DE42B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */,
+				5A72D48E2ECE5685004C5D0E /* spz_wrapper.cc in Sources */,
 				61791DEA2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */,
 				61791DEB2B4154FB00302B58 /* PLYStreamingServer.swift in Sources */,
 				610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */,
 				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,
 				61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
+				5A72D4872ECE5232004C5D0E /* splat-c-types.cc in Sources */,
+				5A72D4882ECE5232004C5D0E /* load-spz.cc in Sources */,
+				5A72D4892ECE5232004C5D0E /* splat-types.cc in Sources */,
 				61791DE82B4154FB00302B57 /* ModelRenderer.swift in Sources */,
 				61791DCF2B41544300302B57 /* Assets.xcassets in Sources */,
 				61791E132B416DD700302B57 /* Constants.swift in Sources */,
