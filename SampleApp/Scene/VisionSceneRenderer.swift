@@ -164,10 +164,16 @@ class VisionSceneRenderer {
         
         frame.startSubmission()
 
+        let drawables = frame.queryDrawables()
+        
+        if drawables.isEmpty {
+            return
+        }
+
         let presentationTime = LayerRenderer.Clock.Instant.epoch.duration(to: timing.presentationTime).timeInterval
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: presentationTime)
 
-        for drawable in frame.queryDrawables() {
+        for drawable in drawables {
             drawable.deviceAnchor = deviceAnchor
             
             let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
