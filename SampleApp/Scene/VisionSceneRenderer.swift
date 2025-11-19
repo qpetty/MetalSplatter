@@ -52,6 +52,34 @@ class VisionSceneRenderer {
 
         worldTracking = WorldTrackingProvider()
         arSession = ARKitSession()
+        
+        NotificationCenter.default.addObserver(forName: Constants.plyReceivedNotificationName, object: nil, queue: nil) { [weak self] notification in
+            self?.handlePLYReceived(notification)
+        }
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    private func handlePLYReceived(_ notification: Notification) {
+        guard let url = notification.userInfo?["url"] as? URL else { return }
+        
+        Task {
+            do {
+                if let splatRenderer = self.modelRenderer as? SplatRenderer {
+                    Self.log.info("Reloading PLY into existing renderer: \(url.lastPathComponent)")
+                    splatRenderer.clear()
+                    try await splatRenderer.read(from: url)
+                    self.modelRadius = splatRenderer.modelRadius
+                } else {
+                    Self.log.info("Loading new PLY: \(url.lastPathComponent)")
+                    try await self.load(.gaussianSplat(url))
+                }
+            } catch {
+                Self.log.error("Failed to reload PLY: \(error.localizedDescription)")
+            }
+        }
     }
 
     func load(_ model: ModelIdentifier?) async throws {

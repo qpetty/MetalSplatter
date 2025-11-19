@@ -28,10 +28,20 @@ kernel void calcSplatDistances(device float* distances [[buffer(0)]],
         float3 delta = pos - cameraPosition;
         // We want to sort by distance descending.
         // Squared distance is monotonic with distance, so it preserves order.
-        distances[gid] = dot(delta, delta);
+        float dist = dot(delta, delta);
+        if (isnan(dist) || isinf(dist)) {
+            distances[gid] = -INFINITY;
+        } else {
+            distances[gid] = dist;
+        }
     } else {
         // Sort by projection along forward vector
-        distances[gid] = dot(pos, cameraForward);
+        float dist = dot(pos, cameraForward);
+        if (isnan(dist) || isinf(dist)) {
+            distances[gid] = -INFINITY;
+        } else {
+            distances[gid] = dist;
+        }
     }
 }
 
@@ -154,6 +164,17 @@ kernel void reorderSplats(device Splat* outSplats [[buffer(0)]],
     if (gid >= splatCount) return;
     
     uint sortedIndex = indices[gid];
-    outSplats[gid] = inSplats[sortedIndex];
+    
+    if (sortedIndex >= splatCount) {
+        // This can happen if the sort fails (e.g. due to NaNs) or if there's a logic error.
+        // We must avoid reading OOB from inSplats.
+        // Use the first splat as a dummy, but make it invisible.
+        outSplats[gid] = inSplats[0];
+        // Set alpha to 0 to hide it. packed_half4 is (r, g, b, a)
+        // We can't easily access .a directly on packed type, so assign a new value
+        outSplats[gid].color = packed_half4(0.0h, 0.0h, 0.0h, 0.0h);
+    } else {
+        outSplats[gid] = inSplats[sortedIndex];
+    }
 }
 

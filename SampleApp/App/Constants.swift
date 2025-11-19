@@ -9,5 +9,7 @@ enum Constants {
     static let fovy = Angle(degrees: 65)
 #endif
     static let modelCenterZ: Float = -8
+    
+    static let plyReceivedNotificationName = Notification.Name("PLYReceivedNotification")
 }
 

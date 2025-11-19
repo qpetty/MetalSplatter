@@ -229,6 +229,10 @@ public class SplatRenderer {
         try? splatBuffer.setCapacity(0)
     }
 
+    public func clear() {
+        splatBuffer.count = 0
+    }
+
     public func read(from url: URL) async throws {
         var newPoints = SplatMemoryBuffer()
         try await newPoints.read(from: try AutodetectSceneReader(url))

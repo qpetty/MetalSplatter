@@ -39,20 +39,8 @@ struct ContentView: View {
         }
     }
     
-    private func reloadStreamingModel() async {
-        // Force reload by dismissing and reopening the immersive space
-        // This ensures the file is reloaded even though the URL is the same
-        guard let currentModel = currentStreamingModelIdentifier else { return }
-        
-        // Always dismiss first (safe even if not shown)
-        await dismissImmersiveSpace()
-        immersiveSpaceIsShown = false
-        // Small delay to ensure dismissal completes
-        try? await Task.sleep(for: .milliseconds(100))
-        
-        // Reopen with the same model (file content has changed)
-        openWindow(value: currentModel)
-    }
+    
+    // private func reloadStreamingModel() async { ... } // Removed as we now use in-place updates
 #endif
 
     var body: some View {
@@ -158,8 +146,8 @@ struct ContentView: View {
                     let modelIdentifier = ModelIdentifier.gaussianSplat(url)
                     currentStreamingModelIdentifier = modelIdentifier
                     
-                    // Always reload - reloadStreamingModel handles the state check
-                    await reloadStreamingModel()
+                    // We no longer need to force reload the immersive space.
+                    // VisionSceneRenderer listens for the notification and updates the model in-place.
                 }
             }
         }

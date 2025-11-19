@@ -70,6 +70,14 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             parameters.allowLocalEndpointReuse = true
             parameters.includePeerToPeer = false
             
+            // Enable TCP Keepalive to maintain long connections
+            if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+                tcpOptions.enableKeepalive = true
+                tcpOptions.keepaliveIdle = 10 // Send keepalive after 10 seconds of idle
+                tcpOptions.keepaliveInterval = 5 // Retrospect every 5 seconds
+                tcpOptions.keepaliveCount = 5 // Fail after 5 missed keepalives
+            }
+            
             listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
             
             listener?.newConnectionHandler = { [weak self] connection in
@@ -230,12 +238,14 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             var boundary: String?
             var isHeaderComplete = false
             var requestPath: String?
+            var lastLoggedSize = 0
         }
         
         let state = ConnectionState()
         
         func receiveNext() {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            // Increased maximumLength to 1MB for better throughput on large files
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1024 * 1024) { [weak self] data, _, isComplete, error in
                 if let error = error {
                     Self.log.error("Connection error: \(error.localizedDescription)")
                     self?.sendErrorResponse(connection, statusCode: 500, message: "Internal Server Error")
@@ -258,6 +268,11 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                                 state.contentLength = self?.parseContentLength(from: headers)
                                 state.boundary = self?.parseBoundary(from: headers)
                                 Self.log.info("Request: \(state.requestPath ?? "nil"), Content-Length: \(state.contentLength ?? -1)")
+                                
+                                // Reserve capacity if we know the content length to avoid reallocations
+                                if let len = state.contentLength {
+                                    state.receivedData.reserveCapacity(len + 1024)
+                                }
                             }
                             
                             // Check if path is /api/upload
@@ -274,12 +289,24 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                     } else {
                         // Receiving body
                         state.receivedData.append(data)
+                        
+                        // Log progress every ~5MB
+                        if state.receivedData.count - state.lastLoggedSize > 5 * 1024 * 1024 {
+                            if let total = state.contentLength {
+                                let percent = Int(Double(state.receivedData.count) / Double(total) * 100)
+                                Self.log.info("Receiving upload: \(state.receivedData.count) / \(total) bytes (\(percent)%)")
+                            } else {
+                                Self.log.info("Receiving upload: \(state.receivedData.count) bytes")
+                            }
+                            state.lastLoggedSize = state.receivedData.count
+                        }
                     }
                     
                     // Check if we have the full body
                     if state.isHeaderComplete {
                         if let contentLength = state.contentLength {
                             if state.receivedData.count >= contentLength {
+                                Self.log.info("Upload complete (\(state.receivedData.count) bytes). Processing...")
                                 let bodyData = state.receivedData.prefix(contentLength)
                                 self?.processMultipartData(data: Data(bodyData), boundary: state.boundary, connection: connection)
                                 return
@@ -295,6 +322,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                             self?.processMultipartData(data: state.receivedData, boundary: state.boundary, connection: connection)
                         } else {
                             // We have content length but connection closed before we got it all
+                            Self.log.error("Connection closed before full body received. Got \(state.receivedData.count), expected \(state.contentLength ?? -1)")
                             self?.sendErrorResponse(connection, statusCode: 400, message: "Incomplete body")
                         }
                     } else {
@@ -407,6 +435,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                             self.lastReceivedFileURL = fileURL
                             self.lastCaptureID = captureID
                             self.onFileReceived?(fileURL, captureID)
+                            NotificationCenter.default.post(name: Constants.plyReceivedNotificationName, object: nil, userInfo: ["url": fileURL])
                         }
                     }
                 }
@@ -419,6 +448,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                     self.lastReceivedFileURL = fileURL
                     self.lastCaptureID = captureID
                     self.onFileReceived?(fileURL, captureID)
+                    NotificationCenter.default.post(name: Constants.plyReceivedNotificationName, object: nil, userInfo: ["url": fileURL])
                 }
                 
                 // Send success response
@@ -625,4 +655,3 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
 }
 
 #endif // os(visionOS)
-
