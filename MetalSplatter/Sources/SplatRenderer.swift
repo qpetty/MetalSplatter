@@ -100,11 +100,6 @@ public class SplatRenderer {
         var covB: PackedHalf3
     }
 
-    struct SplatIndexAndDepth {
-        var index: UInt32
-        var depth: Float
-    }
-
     public let device: MTLDevice
     public let colorFormat: MTLPixelFormat
     public let depthFormat: MTLPixelFormat
@@ -160,6 +155,14 @@ public class SplatRenderer {
     private var postprocessPipelineState: MTLRenderPipelineState?
     private var postprocessDepthState: MTLDepthStencilState?
 
+    // Compute pipelines for sorting
+    private var calcDistancesPipelineState: MTLComputePipelineState?
+    private var bitonicSortPipelineState: MTLComputePipelineState?
+    private var reorderSplatsPipelineState: MTLComputePipelineState?
+
+    private var distanceBuffer: MetalBuffer<Float>?
+    private var sortIndexBuffer: MetalBuffer<UInt32>?
+
     // dynamicUniformBuffers contains maxSimultaneousRenders uniforms buffers,
     // which we round-robin through, one per render; this is managed by switchToNextDynamicBuffer.
     // uniforms = the i'th buffer (where i = uniformBufferIndex, which varies from 0 to maxSimultaneousRenders-1)
@@ -185,9 +188,6 @@ public class SplatRenderer {
     var indexBuffer: MetalBuffer<UInt32>
 
     public var splatCount: Int { splatBuffer.count }
-
-    var sorting = false
-    var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
@@ -242,6 +242,9 @@ public class SplatRenderer {
         drawSplatDepthState = nil
         postprocessPipelineState = nil
         postprocessDepthState = nil
+        calcDistancesPipelineState = nil
+        bitonicSortPipelineState = nil
+        reorderSplatsPipelineState = nil
     }
 
     private func buildSingleStagePipelineStatesIfNeeded() throws {
@@ -259,6 +262,14 @@ public class SplatRenderer {
         drawSplatDepthState = try buildDrawSplatDepthState()
         postprocessPipelineState = try buildPostprocessPipelineState()
         postprocessDepthState = try buildPostprocessDepthState()
+    }
+
+    private func buildComputePipelinesIfNeeded() throws {
+        guard calcDistancesPipelineState == nil else { return }
+
+        calcDistancesPipelineState = try device.makeComputePipelineState(function: library.makeRequiredFunction(name: "calcSplatDistances"))
+        bitonicSortPipelineState = try device.makeComputePipelineState(function: library.makeRequiredFunction(name: "bitonicSort"))
+        reorderSplatsPipelineState = try device.makeComputePipelineState(function: library.makeRequiredFunction(name: "reorderSplats"))
     }
 
     private func buildSingleStagePipelineState() throws -> MTLRenderPipelineState {
@@ -412,10 +423,6 @@ public class SplatRenderer {
 
         cameraWorldPosition = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
         cameraWorldForward = viewports.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
-
-        if !sorting {
-            resort()
-        }
     }
 
     private static func cameraWorldForward(forViewMatrix view: simd_float4x4) -> simd_float3 {
@@ -424,6 +431,103 @@ public class SplatRenderer {
 
     private static func cameraWorldPosition(forViewMatrix view: simd_float4x4) -> simd_float3 {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: 0, w: 1)).xyz
+    }
+
+    private func nextPowerOfTwo(_ val: Int) -> Int {
+        var n = val - 1
+        n |= n >> 1
+        n |= n >> 2
+        n |= n >> 4
+        n |= n >> 8
+        n |= n >> 16
+        return n + 1
+    }
+
+    private func sortGPU(commandBuffer: MTLCommandBuffer) throws {
+        try buildComputePipelinesIfNeeded()
+        guard let calcDistancesPipelineState,
+              let bitonicSortPipelineState,
+              let reorderSplatsPipelineState else { return }
+
+        let splatCount = splatBuffer.count
+        guard splatCount > 0 else { return }
+
+        let paddedCount = nextPowerOfTwo(splatCount)
+
+        if distanceBuffer == nil || distanceBuffer!.capacity < paddedCount {
+            distanceBuffer = try MetalBuffer(device: device, capacity: paddedCount)
+        }
+        if sortIndexBuffer == nil || sortIndexBuffer!.capacity < paddedCount {
+            sortIndexBuffer = try MetalBuffer(device: device, capacity: paddedCount)
+        }
+
+        // Ensure splatBufferPrime is large enough for reordering
+        try splatBufferPrime.ensureCapacity(splatCount)
+
+        guard let distanceBuffer, let sortIndexBuffer else { return }
+
+        guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        computeEncoder.label = "Splat Sort"
+
+        // 1. Calculate Distances
+        computeEncoder.setComputePipelineState(calcDistancesPipelineState)
+        computeEncoder.setBuffer(distanceBuffer.buffer, offset: 0, index: 0)
+        computeEncoder.setBuffer(sortIndexBuffer.buffer, offset: 0, index: 1)
+        computeEncoder.setBuffer(splatBuffer.buffer, offset: 0, index: 2)
+        var splatCountUInt = UInt32(splatCount)
+        computeEncoder.setBytes(&splatCountUInt, length: MemoryLayout<UInt32>.size, index: 3)
+
+        var cameraPos = cameraWorldPosition
+        computeEncoder.setBytes(&cameraPos, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
+        var cameraFwd = cameraWorldForward
+        computeEncoder.setBytes(&cameraFwd, length: MemoryLayout<SIMD3<Float>>.size, index: 5)
+        var sortByDist = Constants.sortByDistance
+        computeEncoder.setBytes(&sortByDist, length: MemoryLayout<Bool>.size, index: 6)
+
+        let threadsPerThreadgroup = MTLSize(width: min(calcDistancesPipelineState.maxTotalThreadsPerThreadgroup, paddedCount), height: 1, depth: 1)
+        let threadgroups = MTLSize(width: (paddedCount + threadsPerThreadgroup.width - 1) / threadsPerThreadgroup.width, height: 1, depth: 1)
+        computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
+
+        // 2. Bitonic Sort
+        computeEncoder.setComputePipelineState(bitonicSortPipelineState)
+        computeEncoder.setBuffer(distanceBuffer.buffer, offset: 0, index: 0)
+        computeEncoder.setBuffer(sortIndexBuffer.buffer, offset: 0, index: 1)
+
+        var stage: UInt32 = 2
+        while stage <= paddedCount {
+            var pass = stage / 2
+            while pass > 0 {
+                computeEncoder.setBytes(&stage, length: MemoryLayout<UInt32>.size, index: 2)
+                computeEncoder.setBytes(&pass, length: MemoryLayout<UInt32>.size, index: 3)
+
+                let threadsPerThreadgroupSort = MTLSize(width: min(bitonicSortPipelineState.maxTotalThreadsPerThreadgroup, paddedCount), height: 1, depth: 1)
+                let threadgroupsSort = MTLSize(width: (paddedCount + threadsPerThreadgroupSort.width - 1) / threadsPerThreadgroupSort.width, height: 1, depth: 1)
+
+                computeEncoder.dispatchThreadgroups(threadgroupsSort, threadsPerThreadgroup: threadsPerThreadgroupSort)
+
+                computeEncoder.memoryBarrier(scope: .buffers)
+
+                pass /= 2
+            }
+            stage *= 2
+        }
+
+        // 3. Reorder
+        computeEncoder.setComputePipelineState(reorderSplatsPipelineState)
+        computeEncoder.setBuffer(splatBufferPrime.buffer, offset: 0, index: 0) // Out
+        computeEncoder.setBuffer(splatBuffer.buffer, offset: 0, index: 1)      // In
+        computeEncoder.setBuffer(sortIndexBuffer.buffer, offset: 0, index: 2)  // Indices
+        computeEncoder.setBytes(&splatCountUInt, length: MemoryLayout<UInt32>.size, index: 3)
+
+        let threadsPerThreadgroupReorder = MTLSize(width: min(reorderSplatsPipelineState.maxTotalThreadsPerThreadgroup, splatCount), height: 1, depth: 1)
+        let threadgroupsReorder = MTLSize(width: (splatCount + threadsPerThreadgroupReorder.width - 1) / threadsPerThreadgroupReorder.width, height: 1, depth: 1)
+        computeEncoder.dispatchThreadgroups(threadgroupsReorder, threadsPerThreadgroup: threadsPerThreadgroupReorder)
+
+        computeEncoder.endEncoding()
+
+        // Swap buffers
+        swap(&splatBuffer, &splatBufferPrime)
+        splatBuffer.count = splatCount
     }
 
     func renderEncoder(multiStage: Bool,
@@ -492,6 +596,8 @@ public class SplatRenderer {
 
         switchToNextDynamicBuffer()
         updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
+
+        try sortGPU(commandBuffer: commandBuffer)
 
         let multiStage = useMultiStagePipeline
         if multiStage {
@@ -576,59 +682,6 @@ public class SplatRenderer {
         }
 
         renderEncoder.endEncoding()
-    }
-
-    // Sort splatBuffer (read-only), storing the results in splatBuffer (write-only) then swap splatBuffer and splatBufferPrime
-    public func resort() {
-        guard !sorting else { return }
-        sorting = true
-        onSortStart?()
-        let sortStartTime = Date()
-
-        let splatCount = splatBuffer.count
-
-        let cameraWorldForward = cameraWorldForward
-        let cameraWorldPosition = cameraWorldPosition
-
-        Task(priority: .high) {
-            defer {
-                sorting = false
-                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
-            }
-
-            if orderAndDepthTempSort.count != splatCount {
-                orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-            }
-
-            if Constants.sortByDistance {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = (splatPosition - cameraWorldPosition).lengthSquared
-                }
-            } else {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = dot(splatPosition, cameraWorldForward)
-                }
-            }
-
-            orderAndDepthTempSort.sort { $0.depth > $1.depth }
-
-            do {
-                try splatBufferPrime.setCapacity(splatCount)
-                splatBufferPrime.count = 0
-                for newIndex in 0..<orderAndDepthTempSort.count {
-                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
-                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
-                }
-
-                swap(&splatBuffer, &splatBufferPrime)
-            } catch {
-                // TODO: report error
-            }
-        }
     }
 
     private func updateBounds(with points: [SplatScenePoint]) {
