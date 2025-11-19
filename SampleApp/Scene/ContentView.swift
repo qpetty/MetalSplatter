@@ -149,6 +149,9 @@ struct ContentView: View {
             isStreamingMode = true
             streamingServer.start()
             
+            // Open immersive space immediately in streaming mode
+            openWindow(value: .streaming)
+            
             // Set up file received handler
             streamingServer.onFileReceived = { url, captureID in
                 Task { @MainActor in

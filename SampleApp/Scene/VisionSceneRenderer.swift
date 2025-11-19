@@ -85,6 +85,8 @@ class VisionSceneRenderer {
                                                    sampleCount: 1,
                                                    maxViewCount: layerRenderer.properties.viewCount,
                                                    maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+        case .streaming:
+            break
         case .none:
             break
         }

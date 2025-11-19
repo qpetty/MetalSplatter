@@ -196,6 +196,8 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                              maxSimultaneousRenders: Constants.maxSimultaneousRenders)
                 // No file monitoring for sample box
             }
+        case .streaming:
+            break
         case .none:
             break
         }
