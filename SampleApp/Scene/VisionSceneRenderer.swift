@@ -89,6 +89,15 @@ class VisionSceneRenderer {
             break
         }
     }
+    
+    // Force reload even if model URL is the same (for streaming updates)
+    func reload() async throws {
+        guard let model = self.model else { return }
+        // Temporarily clear model to force reload
+        let currentModel = model
+        self.model = nil
+        try await load(currentModel)
+    }
 
     func startRenderLoop() {
         Task {
