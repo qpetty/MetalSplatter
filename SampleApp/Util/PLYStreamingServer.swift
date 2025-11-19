@@ -388,16 +388,27 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             let isSPZFile = filename?.lowercased().hasSuffix(".spz") ?? false
             
             if isSPZFile {
-                // Decompress SPZ file
-                if decompressSPZToPLY(spzData: fileData, outputURL: fileURL, captureID: captureID) {
-                    Task { @MainActor in
-                        self.lastReceivedFileURL = fileURL
-                        self.lastCaptureID = captureID
-                        self.onFileReceived?(fileURL, captureID)
+                // Save SPZ file temporarily
+                let tempSPZURL = fileURL.deletingLastPathComponent().appendingPathComponent("temp_received.spz")
+                try? FileManager.default.removeItem(at: tempSPZURL)
+                try fileData.write(to: tempSPZURL)
+                
+                Self.log.info("Received SPZ file saved to: \(tempSPZURL.path), capture_id: \(captureID ?? "none")")
+                
+                // Send success response immediately
+                sendSuccessResponse(connection, message: "SPZ file received successfully")
+                
+                // Decompress SPZ to PLY asynchronously after response is sent
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    guard let self = self else { return }
+                    
+                    if self.decompressSPZToPLY(spzFileURL: tempSPZURL, outputURL: fileURL, captureID: captureID) {
+                        await MainActor.run {
+                            self.lastReceivedFileURL = fileURL
+                            self.lastCaptureID = captureID
+                            self.onFileReceived?(fileURL, captureID)
+                        }
                     }
-                    sendSuccessResponse(connection, message: "SPZ file decompressed successfully")
-                } else {
-                    sendErrorResponse(connection, statusCode: 500, message: "Failed to decompress SPZ file")
                 }
             } else {
                 // Regular PLY file, save as-is
@@ -507,33 +518,25 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         return nil
     }
     
-    nonisolated private func decompressSPZToPLY(spzData: Data, outputURL: URL, captureID: String?) -> Bool {
-        // Save SPZ file temporarily
-        let tempSPZURL = outputURL.deletingLastPathComponent().appendingPathComponent("temp_received.spz")
+    nonisolated private func decompressSPZToPLY(spzFileURL: URL, outputURL: URL, captureID: String?) -> Bool {
         defer {
-            // Clean up temp SPZ file
-            try? FileManager.default.removeItem(at: tempSPZURL)
+            // Clean up temp SPZ file after decompression
+            try? FileManager.default.removeItem(at: spzFileURL)
         }
         
-        do {
-            // Remove old temp file if it exists
-            try? FileManager.default.removeItem(at: tempSPZURL)
-            try spzData.write(to: tempSPZURL)
-        } catch {
-            Self.log.error("Failed to write temporary SPZ file: \(error.localizedDescription)")
-            return false
-        }
-        
-        Self.log.info("Received SPZ file, decompressing to PLY...")
+        let startTime = Date()
+        Self.log.info("Decompressing SPZ file to PLY...")
         
         // Decompress SPZ to PLY
-        let spzPath = tempSPZURL.path
+        let spzPath = spzFileURL.path
         let plyPath = outputURL.path
         
         // Load SPZ file
+        let loadStartTime = Date()
         let cloud: UnsafeMutableRawPointer? = spzPath.withCString { spzPathPtr in
             return spz_load_spz_from_file(spzPathPtr)
         }
+        let loadDuration = Date().timeIntervalSince(loadStartTime)
         
         guard let cloud = cloud else {
             Self.log.error("Failed to load SPZ file: \(spzPath)")
@@ -544,6 +547,8 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             spz_gaussian_cloud_destroy(cloud)
         }
         
+        Self.log.info("SPZ file loaded in \(String(format: "%.3f", loadDuration))s")
+        
         // Create pack options (optional, can be nil)
         let options = spz_pack_options_create()
         defer {
@@ -553,15 +558,20 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         }
         
         // Save as PLY
+        let saveStartTime = Date()
         let success = plyPath.withCString { plyPathPtr in
             return spz_save_splat_to_ply(cloud, options, plyPathPtr)
         }
+        let saveDuration = Date().timeIntervalSince(saveStartTime)
+        
+        let totalDuration = Date().timeIntervalSince(startTime)
         
         if success {
             Self.log.info("SPZ file decompressed to PLY: \(plyPath), capture_id: \(captureID ?? "none")")
+            Self.log.info("Decompression timing - Load: \(String(format: "%.3f", loadDuration))s, Save: \(String(format: "%.3f", saveDuration))s, Total: \(String(format: "%.3f", totalDuration))s")
             return true
         } else {
-            Self.log.error("Failed to save decompressed PLY file")
+            Self.log.error("Failed to save decompressed PLY file (took \(String(format: "%.3f", totalDuration))s)")
             return false
         }
     }
