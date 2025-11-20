@@ -237,6 +237,29 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
             
+            if !streamingServer.lastRequestParameters.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Last Request Parameters")
+                        .font(.headline)
+                    
+                    ForEach(streamingServer.lastRequestParameters.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        HStack {
+                            Text("\(key):")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(value)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+            }
+            
             Button("Stop Streaming Mode") {
                 streamingServer.stop()
                 isStreamingMode = false

@@ -96,10 +96,19 @@ class VisionSceneRenderer {
         Task {
             do {
                 if let splatRenderer = self.modelRenderer as? SplatRenderer {
-                    Self.log.info("Reloading PLY into existing renderer: \(url.lastPathComponent)")
-                    splatRenderer.clear()
-                    try await splatRenderer.read(from: url)
-                    self.modelRadius = splatRenderer.modelRadius
+                    Self.log.info("Preparing replacement renderer for PLY: \(url.lastPathComponent)")
+                    
+                    let replacementRenderer = try self.makeSplatRenderer()
+                    replacementRenderer.highQualityDepth = splatRenderer.highQualityDepth
+                    replacementRenderer.clearColor = splatRenderer.clearColor
+                    replacementRenderer.onSortStart = splatRenderer.onSortStart
+                    replacementRenderer.onSortComplete = splatRenderer.onSortComplete
+                    
+                    try await replacementRenderer.read(from: url)
+                    
+                    Self.log.info("Switching to replacement renderer for PLY: \(url.lastPathComponent)")
+                    self.modelRenderer = replacementRenderer
+                    self.modelRadius = replacementRenderer.modelRadius
                 } else {
                     Self.log.info("Loading new PLY: \(url.lastPathComponent)")
                     try await self.load(.gaussianSplat(url))
@@ -129,15 +138,9 @@ class VisionSceneRenderer {
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try SplatRenderer(device: device,
-                                          colorFormat: layerRenderer.configuration.colorFormat,
-                                          depthFormat: layerRenderer.configuration.depthFormat,
-                                          sampleCount: 1,
-                                          maxViewCount: layerRenderer.properties.viewCount,
-                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            let splat = try makeSplatRenderer()
             try await splat.read(from: url)
             modelRenderer = splat
-
             // Center the model in world space
             if let splatRenderer = splat as? SplatRenderer {
                 modelPosition = SIMD3<Float>(0.0, 0.0, -2) // Keep initial position
@@ -158,6 +161,15 @@ class VisionSceneRenderer {
         case .none:
             break
         }
+    }
+    
+    private func makeSplatRenderer() throws -> SplatRenderer {
+        try SplatRenderer(device: device,
+                          colorFormat: layerRenderer.configuration.colorFormat,
+                          depthFormat: layerRenderer.configuration.depthFormat,
+                          sampleCount: 1,
+                          maxViewCount: layerRenderer.properties.viewCount,
+                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
     }
     
     // Force reload even if model URL is the same (for streaming updates)

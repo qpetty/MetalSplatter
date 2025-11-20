@@ -28,6 +28,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
     @MainActor @Published var lastReceivedFileURL: URL?
     @MainActor @Published var lastCaptureID: String?
     @MainActor @Published var localNetworkPermissionDenied: Bool = false
+    @MainActor @Published var lastRequestParameters: [String: String] = [:]
     
     private var listener: NWListener?
     private var bonjourService: NetService?
@@ -373,6 +374,11 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         return nil
     }
     
+    private enum MultipartPart {
+        case file(data: Data, filename: String)
+        case field(name: String, value: String)
+    }
+    
     nonisolated private func processMultipartData(data: Data, boundary: String?, connection: NWConnection) {
         guard let boundary = boundary else {
             Self.log.error("No boundary found in multipart data")
@@ -386,18 +392,21 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         var fileData: Data?
         var filename: String?
         var captureID: String?
+        var parameters: [String: String] = [:]
         
         for part in parts {
-            if let (partFileData, partFilename, partCaptureID) = parseMultipartPart(part) {
-                if partFileData != nil {
-                    fileData = partFileData
-                    filename = partFilename
-                }
-                if let id = partCaptureID {
-                    captureID = id
-                }
+            guard let parsedPart = parseMultipartPart(part) else { continue }
+            
+            switch parsedPart {
+            case .file(let data, let partFilename):
+                fileData = data
+                filename = partFilename
+            case .field(let name, let value):
+                parameters[name] = value
             }
         }
+        
+        captureID = parameters["capture_id"]
         
         guard let fileData = fileData else {
             Self.log.error("No file data found in multipart request")
@@ -434,6 +443,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                         await MainActor.run {
                             self.lastReceivedFileURL = fileURL
                             self.lastCaptureID = captureID
+                            self.lastRequestParameters = parameters
                             self.onFileReceived?(fileURL, captureID)
                             NotificationCenter.default.post(name: Constants.plyReceivedNotificationName, object: nil, userInfo: ["url": fileURL])
                         }
@@ -447,6 +457,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                 Task { @MainActor in
                     self.lastReceivedFileURL = fileURL
                     self.lastCaptureID = captureID
+                    self.lastRequestParameters = parameters
                     self.onFileReceived?(fileURL, captureID)
                     NotificationCenter.default.post(name: Constants.plyReceivedNotificationName, object: nil, userInfo: ["url": fileURL])
                 }
@@ -490,14 +501,14 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         return parts
     }
     
-    nonisolated private func parseMultipartPart(_ part: Data) -> (Data?, String?, String?)? {
+    nonisolated private func parseMultipartPart(_ part: Data) -> MultipartPart? {
         // Look for header/body separator (CRLF CRLF)
         guard let separatorRange = part.range(of: "\r\n\r\n".data(using: .utf8)!) else {
             return nil
         }
         
         let headerData = part.subdata(in: part.startIndex..<separatorRange.lowerBound)
-        let bodyData = part.subdata(in: separatorRange.upperBound..<part.endIndex)
+        var bodyData = part.subdata(in: separatorRange.upperBound..<part.endIndex)
         
         guard let headers = String(data: headerData, encoding: .utf8) else {
             return nil
@@ -505,7 +516,6 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         
         var filename: String?
         var fieldName: String?
-        var captureID: String?
         
         // Parse Content-Disposition header
         for line in headers.components(separatedBy: "\r\n") {
@@ -527,25 +537,20 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             }
         }
         
-        // If this is the file field, return file data
-        if fieldName == "file" && filename != nil {
+        guard let fieldName = fieldName else {
+            return nil
+        }
+        
+        if let filename = filename {
             // Trim trailing CRLF if present (multipart form data often has trailing newlines)
-            var trimmedData = bodyData
-            while trimmedData.count > 0 && (trimmedData.last == 0x0D || trimmedData.last == 0x0A) {
-                trimmedData = trimmedData.dropLast()
+            while let lastByte = bodyData.last, (lastByte == 0x0D || lastByte == 0x0A) {
+                bodyData.removeLast()
             }
-            return (trimmedData, filename, nil)
+            return .file(data: bodyData, filename: filename)
+        } else {
+            let value = String(data: bodyData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return .field(name: fieldName, value: value)
         }
-        
-        // If this is the capture_id field, extract the value
-        if fieldName == "capture_id" {
-            if let bodyString = String(data: bodyData, encoding: .utf8) {
-                captureID = bodyString.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            return (nil, nil, captureID) // Return capture_id
-        }
-        
-        return nil
     }
     
     nonisolated private func decompressSPZToPLY(spzFileURL: URL, outputURL: URL, captureID: String?) -> Bool {
