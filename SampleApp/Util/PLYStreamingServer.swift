@@ -173,7 +173,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             }
         }
         
-        browser?.browseResultsChangedHandler = { [weak self] results, changes in
+        browser?.browseResultsChangedHandler = { results, changes in
             // Just having the browser active helps trigger permission
             // We don't need to do anything with the results
         }
@@ -240,16 +240,51 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
             var isHeaderComplete = false
             var requestPath: String?
             var lastLoggedSize = 0
+            var keepAlive = false
+            var idleTimer: DispatchSourceTimer?
+            
+            func reset() {
+                receivedData = Data()
+                contentLength = nil
+                boundary = nil
+                isHeaderComplete = false
+                requestPath = nil
+                lastLoggedSize = 0
+                keepAlive = false
+            }
         }
         
         let state = ConnectionState()
+        let idleTimeout: TimeInterval = 30.0 // 30 seconds idle timeout
+        
+        // Setup idle timeout timer
+        func setupIdleTimer() {
+            state.idleTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            timer.schedule(deadline: .now() + idleTimeout)
+            timer.setEventHandler {
+                Self.log.info("Connection idle timeout, closing")
+                connection.cancel()
+            }
+            timer.resume()
+            state.idleTimer = timer
+        }
+        
+        func cancelIdleTimer() {
+            state.idleTimer?.cancel()
+            state.idleTimer = nil
+        }
         
         func receiveNext() {
+            // Reset idle timer on each receive
+            if state.keepAlive {
+                setupIdleTimer()
+            }
             // Increased maximumLength to 1MB for better throughput on large files
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1024 * 1024) { [weak self] data, _, isComplete, error in
                 if let error = error {
                     Self.log.error("Connection error: \(error.localizedDescription)")
-                    self?.sendErrorResponse(connection, statusCode: 500, message: "Internal Server Error")
+                    self?.sendErrorResponse(connection, statusCode: 500, message: "Internal Server Error", keepAlive: false) { _ in }
                     return
                 }
                 
@@ -268,7 +303,8 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                                 state.requestPath = self?.parseRequestPath(from: headers)
                                 state.contentLength = self?.parseContentLength(from: headers)
                                 state.boundary = self?.parseBoundary(from: headers)
-                                Self.log.info("Request: \(state.requestPath ?? "nil"), Content-Length: \(state.contentLength ?? -1)")
+                                state.keepAlive = self?.parseKeepAlive(from: headers) ?? false
+                                Self.log.info("Request: \(state.requestPath ?? "nil"), Content-Length: \(state.contentLength ?? -1), Keep-Alive: \(state.keepAlive)")
                                 
                                 // Reserve capacity if we know the content length to avoid reallocations
                                 if let len = state.contentLength {
@@ -276,9 +312,25 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                                 }
                             }
                             
+                            // Handle HEAD request
+                            if state.requestPath == "/" {
+                                self?.sendSuccessResponse(connection, message: "OK", keepAlive: state.keepAlive) { shouldContinue in
+                                    if shouldContinue {
+                                        state.reset()
+                                        receiveNext()
+                                    }
+                                }
+                                return
+                            }
+                            
                             // Check if path is /api/upload
                             if state.requestPath != "/api/upload" {
-                                self?.sendErrorResponse(connection, statusCode: 404, message: "Not Found")
+                                self?.sendErrorResponse(connection, statusCode: 404, message: "Not Found", keepAlive: state.keepAlive) { shouldContinue in
+                                    if shouldContinue {
+                                        state.reset()
+                                        receiveNext()
+                                    }
+                                }
                                 return
                             }
                             
@@ -309,7 +361,13 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                             if state.receivedData.count >= contentLength {
                                 Self.log.info("Upload complete (\(state.receivedData.count) bytes). Processing...")
                                 let bodyData = state.receivedData.prefix(contentLength)
-                                self?.processMultipartData(data: Data(bodyData), boundary: state.boundary, connection: connection)
+                                let keepAlive = state.keepAlive
+                                self?.processMultipartData(data: Data(bodyData), boundary: state.boundary, connection: connection, keepAlive: keepAlive) { shouldContinue in
+                                    if shouldContinue {
+                                        state.reset()
+                                        receiveNext()
+                                    }
+                                }
                                 return
                             }
                         }
@@ -317,14 +375,21 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                 }
                 
                 if isComplete {
+                    cancelIdleTimer()
                     if state.isHeaderComplete {
                         // If no content length was specified, or we have enough data (checked above), process it
                         if state.contentLength == nil {
-                            self?.processMultipartData(data: state.receivedData, boundary: state.boundary, connection: connection)
+                            let keepAlive = state.keepAlive
+                            self?.processMultipartData(data: state.receivedData, boundary: state.boundary, connection: connection, keepAlive: keepAlive) { shouldContinue in
+                                if shouldContinue {
+                                    state.reset()
+                                    receiveNext()
+                                }
+                            }
                         } else {
                             // We have content length but connection closed before we got it all
                             Self.log.error("Connection closed before full body received. Got \(state.receivedData.count), expected \(state.contentLength ?? -1)")
-                            self?.sendErrorResponse(connection, statusCode: 400, message: "Incomplete body")
+                            self?.sendErrorResponse(connection, statusCode: 400, message: "Incomplete body", keepAlive: false) { _ in }
                         }
                     } else {
                         connection.cancel()
@@ -374,15 +439,25 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         return nil
     }
     
+    nonisolated private func parseKeepAlive(from headers: String) -> Bool {
+        for line in headers.components(separatedBy: "\r\n") {
+            if line.lowercased().hasPrefix("connection:") {
+                let value = line.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces).lowercased()
+                return value == "keep-alive"
+            }
+        }
+        return false
+    }
+    
     private enum MultipartPart {
         case file(data: Data, filename: String)
         case field(name: String, value: String)
     }
     
-    nonisolated private func processMultipartData(data: Data, boundary: String?, connection: NWConnection) {
+    nonisolated private func processMultipartData(data: Data, boundary: String?, connection: NWConnection, keepAlive: Bool, completion: @escaping (Bool) -> Void) {
         guard let boundary = boundary else {
             Self.log.error("No boundary found in multipart data")
-            sendErrorResponse(connection, statusCode: 400, message: "Bad Request: No boundary")
+            sendErrorResponse(connection, statusCode: 400, message: "Bad Request: No boundary", keepAlive: keepAlive, completion: completion)
             return
         }
         
@@ -410,7 +485,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         
         guard let fileData = fileData else {
             Self.log.error("No file data found in multipart request")
-            sendErrorResponse(connection, statusCode: 400, message: "Bad Request: No file")
+            sendErrorResponse(connection, statusCode: 400, message: "Bad Request: No file", keepAlive: keepAlive, completion: completion)
             return
         }
         
@@ -433,7 +508,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                 Self.log.info("Received SPZ file saved to: \(tempSPZURL.path), capture_id: \(captureID ?? "none")")
                 
                 // Send success response immediately
-                sendSuccessResponse(connection, message: "SPZ file received successfully")
+                sendSuccessResponse(connection, message: "SPZ file received successfully", keepAlive: keepAlive, completion: completion)
                 
                 // Decompress SPZ to PLY asynchronously after response is sent
                 Task.detached(priority: .userInitiated) { [weak self] in
@@ -463,11 +538,11 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
                 }
                 
                 // Send success response
-                sendSuccessResponse(connection, message: "File received successfully")
+                sendSuccessResponse(connection, message: "File received successfully", keepAlive: keepAlive, completion: completion)
             }
         } catch {
             Self.log.error("Failed to save received file: \(error.localizedDescription)")
-            sendErrorResponse(connection, statusCode: 500, message: "Failed to save file")
+            sendErrorResponse(connection, statusCode: 500, message: "Failed to save file", keepAlive: keepAlive, completion: completion)
         }
     }
     
@@ -611,21 +686,55 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         }
     }
     
-    nonisolated private func sendSuccessResponse(_ connection: NWConnection, message: String) {
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: \(message.utf8.count)\r\n\r\n\(message)"
+    nonisolated private func sendSuccessResponse(_ connection: NWConnection, message: String, keepAlive: Bool, completion: @escaping (Bool) -> Void) {
+        let connectionHeader = keepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n"
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: \(message.utf8.count)\r\n\(connectionHeader)\r\n\(message)"
         if let responseData = response.data(using: .utf8) {
-            connection.send(content: responseData, completion: .contentProcessed { _ in
-                connection.cancel()
+            connection.send(content: responseData, completion: .contentProcessed { error in
+                if let error = error {
+                    Self.log.error("Failed to send response: \(error.localizedDescription)")
+                    connection.cancel()
+                    completion(false)
+                } else {
+                    if keepAlive {
+                        Self.log.info("Response sent, keeping connection alive for next request")
+                        completion(true)
+                    } else {
+                        Self.log.info("Response sent, closing connection")
+                        connection.cancel()
+                        completion(false)
+                    }
+                }
             })
+        } else {
+            connection.cancel()
+            completion(false)
         }
     }
     
-    nonisolated private func sendErrorResponse(_ connection: NWConnection, statusCode: Int, message: String) {
-        let response = "HTTP/1.1 \(statusCode) \(message)\r\nContent-Type: text/plain\r\nContent-Length: \(message.utf8.count)\r\n\r\n\(message)"
+    nonisolated private func sendErrorResponse(_ connection: NWConnection, statusCode: Int, message: String, keepAlive: Bool, completion: @escaping (Bool) -> Void) {
+        let connectionHeader = keepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n"
+        let response = "HTTP/1.1 \(statusCode) \(message)\r\nContent-Type: text/plain\r\nContent-Length: \(message.utf8.count)\r\n\(connectionHeader)\r\n\(message)"
         if let responseData = response.data(using: .utf8) {
-            connection.send(content: responseData, completion: .contentProcessed { _ in
-                connection.cancel()
+            connection.send(content: responseData, completion: .contentProcessed { error in
+                if let error = error {
+                    Self.log.error("Failed to send error response: \(error.localizedDescription)")
+                    connection.cancel()
+                    completion(false)
+                } else {
+                    if keepAlive {
+                        Self.log.info("Error response sent, keeping connection alive for next request")
+                        completion(true)
+                    } else {
+                        Self.log.info("Error response sent, closing connection")
+                        connection.cancel()
+                        completion(false)
+                    }
+                }
             })
+        } else {
+            connection.cancel()
+            completion(false)
         }
     }
     
