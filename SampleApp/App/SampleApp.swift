@@ -88,6 +88,29 @@ extension Vector3D {
 private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD3<Float>, renderer: VisionSceneRenderer) {
     switch event.phase {
     case .active:
+        if var pinchState = renderer.pinchStates[event.id] {
+            pinchState.location = locationSIMD
+            renderer.pinchStates[event.id] = pinchState
+        } else {
+            renderer.pinchStates[event.id] = .init(id: event.id, location: locationSIMD, kind: .directPinch)
+        }
+
+        if renderer.twoHandGestureState != nil {
+            updateTwoHandGesture(renderer: renderer)
+            return
+        }
+
+        if renderer.pinchStates.count >= 2 {
+            startTwoHandGestureIfPossible(renderer: renderer)
+            if renderer.twoHandGestureState != nil {
+                endDrag(renderer: renderer)
+                updateTwoHandGesture(renderer: renderer)
+                return
+            }
+        }
+
+        guard renderer.twoHandGestureState == nil else { return }
+
         if !renderer.isDragging {
             // Check distance from hand to model center
             let modelCenter = renderer.modelPosition
@@ -109,8 +132,10 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
             renderer.dragStartPosition = renderer.modelPosition
             renderer.previousLocation = locationSIMD
             renderer.hitPointOffset = contactOffset
+            renderer.activeTranslationEventID = event.id
             print("Direct Pinch START - Initial model pos: \(renderer.modelPosition), hand pos: \(locationSIMD)")
         } else {
+            guard renderer.activeTranslationEventID == event.id else { return }
             // Update: Move model so contact point follows hand position exactly
             guard let hitPointOffset = renderer.hitPointOffset else { return }
 
@@ -131,6 +156,10 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
         if event.phase == .cancelled && renderer.dragStartPosition != nil {
             renderer.modelPosition = renderer.dragStartPosition!
         }
+        renderer.pinchStates.removeValue(forKey: event.id)
+        if renderer.twoHandGestureState?.contains(event.id) == true {
+            renderer.twoHandGestureState = nil
+        }
         endDrag(renderer: renderer)
     @unknown default:
         break
@@ -140,6 +169,32 @@ private func handlePinch(event: SpatialEventCollection.Event, locationSIMD: SIMD
 private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: VisionSceneRenderer) {
     switch event.phase {
     case .active:
+        if let inputDevicePose = event.inputDevicePose {
+            let handPosition = inputDevicePose.pose3D.position.simd3
+            if var pinchState = renderer.pinchStates[event.id] {
+                pinchState.location = handPosition
+                renderer.pinchStates[event.id] = pinchState
+            } else {
+                renderer.pinchStates[event.id] = .init(id: event.id, location: handPosition, kind: .indirectPinch)
+            }
+            
+            if renderer.twoHandGestureState != nil {
+                updateTwoHandGesture(renderer: renderer)
+                return
+            }
+            
+            if renderer.pinchStates.count >= 2 {
+                startTwoHandGestureIfPossible(renderer: renderer)
+                if renderer.twoHandGestureState != nil {
+                    endDrag(renderer: renderer)
+                    updateTwoHandGesture(renderer: renderer)
+                    return
+                }
+            }
+        }
+        
+        guard renderer.twoHandGestureState == nil else { return }
+        
         if !renderer.isDragging, let selectionRay = event.selectionRay, let inputDevicePose = event.inputDevicePose {
             // Start: Raycast selectionRay to find hit on model
             guard let hitPoint = raycastToModel(using: selectionRay, renderer: renderer) else {
@@ -161,8 +216,12 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
             renderer.previousLocation = handPosition
             renderer.initialHitPoint = hitPoint
             renderer.hitPointOffset = hitPointOffset
+            renderer.activeTranslationEventID = event.id
             print("Indirect Pinch START - Initial model pos: \(renderer.modelPosition), hit point: \(hitPoint), offset: \(hitPointOffset)")
-        } else if renderer.isDragging, let inputDevicePose = event.inputDevicePose, let previousLocation = renderer.previousLocation {
+        } else if renderer.isDragging,
+                  renderer.activeTranslationEventID == event.id,
+                  let inputDevicePose = event.inputDevicePose,
+                  let previousLocation = renderer.previousLocation {
             // Update: Move model so hit point follows hand position exactly
             let handPosition = inputDevicePose.pose3D.position.simd3
 
@@ -178,6 +237,10 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
         }
     case .ended, .cancelled:
         print("Indirect Pinch ENDED/CANCELLED - Final pos: \(renderer.modelPosition)")
+        renderer.pinchStates.removeValue(forKey: event.id)
+        if renderer.twoHandGestureState?.contains(event.id) == true {
+            renderer.twoHandGestureState = nil
+        }
         endDrag(renderer: renderer)
     @unknown default:
         break
@@ -187,7 +250,9 @@ private func handleIndirectPinch(event: SpatialEventCollection.Event, renderer: 
 
 // Raycast helper using sphere intersection
 private func raycastToModel(using ray: Ray3D, renderer: VisionSceneRenderer) -> Point3D? {
-    return raycastToModelSphere(using: ray, modelPosition: renderer.modelPosition, radius: renderer.modelRadius)
+    return raycastToModelSphere(using: ray,
+                                modelPosition: renderer.modelPosition,
+                                radius: renderer.modelRadius * renderer.modelScale)
 }
 
 // Sphere intersection for raycast hit detection
@@ -224,6 +289,7 @@ private func endDrag(renderer: VisionSceneRenderer) {
     renderer.previousLocation = nil
     renderer.initialHitPoint = nil
     renderer.hitPointOffset = nil
+    renderer.activeTranslationEventID = nil
 }
 
 private func handleTouchMovement(event: SpatialEventCollection.Event, renderer: VisionSceneRenderer) {
@@ -236,6 +302,63 @@ private func handleTouchMovement(event: SpatialEventCollection.Event, renderer: 
         renderer.modelPosition = newPosition
         renderer.previousLocation = currentLoc.simd3
     }
+}
+
+private func startTwoHandGestureIfPossible(renderer: VisionSceneRenderer) {
+    guard renderer.twoHandGestureState == nil else { return }
+    let pinchStates = renderer.pinchStates.values.sorted { $0.id.hashValue < $1.id.hashValue }
+    guard pinchStates.count >= 2 else { return }
+    let first = pinchStates[0]
+    let second = pinchStates[1]
+    
+    let vector = second.location - first.location
+    let distance = simd_length(vector)
+    guard distance > 0.01 else { return }
+    
+    let initialDirection = normalizedHorizontalDirection(from: vector)
+    
+    renderer.twoHandGestureState = VisionSceneRenderer.TwoHandGestureState(
+        firstID: first.id,
+        secondID: second.id,
+        initialDistance: distance,
+        initialScale: renderer.modelScale,
+        initialOrientation: renderer.modelOrientation,
+        initialDirection: initialDirection
+    )
+}
+
+private func updateTwoHandGesture(renderer: VisionSceneRenderer) {
+    guard let state = renderer.twoHandGestureState,
+          let first = renderer.pinchStates[state.firstID],
+          let second = renderer.pinchStates[state.secondID] else {
+        return
+    }
+    
+    let vector = second.location - first.location
+    let distance = simd_length(vector)
+    guard distance > 0.001 else { return }
+    
+    let scaleFactor = distance / state.initialDistance
+    let newScale = simd_clamp(state.initialScale * scaleFactor,
+                              renderer.minimumModelScale,
+                              renderer.maximumModelScale)
+    renderer.modelScale = newScale
+    
+    if let initialDirection = state.initialDirection,
+       let currentDirection = normalizedHorizontalDirection(from: vector) {
+        let dotValue = simd_dot(initialDirection, currentDirection)
+        let determinant = initialDirection.x * currentDirection.y - initialDirection.y * currentDirection.x
+        let deltaAngle = atan2(determinant, dotValue)
+        let deltaQuaternion = simd_quatf(angle: deltaAngle, axis: SIMD3<Float>(0, 1, 0))
+        renderer.modelOrientation = simd_normalize(deltaQuaternion * state.initialOrientation)
+    }
+}
+
+private func normalizedHorizontalDirection(from vector: SIMD3<Float>) -> SIMD2<Float>? {
+    let horizontal = SIMD2<Float>(vector.x, vector.z)
+    let magnitude = simd_length(horizontal)
+    guard magnitude > 0.0001 else { return nil }
+    return horizontal / magnitude
 }
 
 // Distance helper (import simd)

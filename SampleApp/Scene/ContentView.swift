@@ -102,7 +102,7 @@ struct ContentView: View {
                 _ = url.startAccessingSecurityScopedResource()
                 Task {
                     // This is a sample app. In a real app, this should be more tightly scoped, not using a silly timer.
-                    try await Task.sleep(for: .seconds(10))
+                    try await Task.sleep(for: .seconds(1))
                     url.stopAccessingSecurityScopedResource()
                 }
                 openWindow(value: ModelIdentifier.gaussianSplat(url))

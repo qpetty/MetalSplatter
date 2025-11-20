@@ -30,6 +30,15 @@ class VisionSceneRenderer {
 
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
+    
+    var modelOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    var modelScale: Float = 1.0
+    let minimumModelScale: Float = 0.25
+    let maximumModelScale: Float = 4.0
+
+    var activeTranslationEventID: SpatialEventCollection.Event.ID?
+    var pinchStates: [SpatialEventCollection.Event.ID: PinchState] = [:]
+    var twoHandGestureState: TwoHandGestureState?
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
@@ -44,6 +53,25 @@ class VisionSceneRenderer {
     var previousLocation: SIMD3<Float>?
     var initialHitPoint: Point3D?
     var hitPointOffset: SIMD3<Float>? // Offset from model center to hit point
+
+    struct PinchState {
+        let id: SpatialEventCollection.Event.ID
+        var location: SIMD3<Float>
+        var kind: SpatialEventCollection.Event.Kind
+    }
+    
+    struct TwoHandGestureState {
+        let firstID: SpatialEventCollection.Event.ID
+        let secondID: SpatialEventCollection.Event.ID
+        let initialDistance: Float
+        let initialScale: Float
+        let initialOrientation: simd_quatf
+        let initialDirection: SIMD2<Float>?
+        
+        func contains(_ id: SpatialEventCollection.Event.ID) -> Bool {
+            id == firstID || id == secondID
+        }
+    }
 
     init(_ layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
@@ -85,6 +113,18 @@ class VisionSceneRenderer {
     func load(_ model: ModelIdentifier?) async throws {
         guard model != self.model else { return }
         self.model = model
+
+        modelOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        modelScale = 1.0
+        twoHandGestureState = nil
+        pinchStates.removeAll()
+        activeTranslationEventID = nil
+        isDragging = false
+        gestureJustStarted = false
+        dragStartPosition = nil
+        previousLocation = nil
+        initialHitPoint = nil
+        hitPointOffset = nil
 
         modelRenderer = nil
         switch model {
@@ -146,14 +186,17 @@ class VisionSceneRenderer {
     }
 
     private func viewports(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) -> [ModelRendererViewportDescriptor] {
-        let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
-                                                axis: Constants.rotationAxis)
+        let autoRotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
+                                                    axis: Constants.rotationAxis)
+        let userRotationMatrix = simd_float4x4(modelOrientation)
+        let scaleMatrix = matrix4x4_uniform_scale(modelScale)
 //        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
         let worldTranslation = matrix4x4_translation(modelPosition.x, modelPosition.y, modelPosition.z);
         let translationMatrix = worldTranslation;
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        let modelMatrix = translationMatrix * userRotationMatrix * autoRotationMatrix * commonUpCalibration * scaleMatrix
 
         let simdDeviceAnchor = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         
@@ -166,7 +209,7 @@ class VisionSceneRenderer {
                                    y: Int(view.textureMap.viewport.height))
             return ModelRendererViewportDescriptor(viewport: view.textureMap.viewport,
                                                   projectionMatrix: projectionMatrix,
-                                                  viewMatrix: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
+                                                  viewMatrix: userViewpointMatrix * modelMatrix,
                                                   screenSize: screenSize)
         }
     }
