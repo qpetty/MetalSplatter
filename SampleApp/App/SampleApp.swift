@@ -348,7 +348,7 @@ private func updateTwoHandGesture(renderer: VisionSceneRenderer) {
        let currentDirection = normalizedHorizontalDirection(from: vector) {
         let dotValue = simd_dot(initialDirection, currentDirection)
         let determinant = initialDirection.x * currentDirection.y - initialDirection.y * currentDirection.x
-        let deltaAngle = atan2(determinant, dotValue)
+        let deltaAngle = -atan2(determinant, dotValue)
         let deltaQuaternion = simd_quatf(angle: deltaAngle, axis: SIMD3<Float>(0, 1, 0))
         renderer.modelOrientation = simd_normalize(deltaQuaternion * state.initialOrientation)
     }
