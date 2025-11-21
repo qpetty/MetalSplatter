@@ -216,7 +216,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         let viewMatrix: matrix_float4x4
 #if os(macOS)
         if let cameraController = cameraController {
-            viewMatrix = cameraController.getViewMatrix(commonUpCalibration: commonUpCalibration)
+            viewMatrix = cameraController.getViewMatrix() * commonUpCalibration
         } else {
             // Fallback to auto-rotation if camera controller is not set
             let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
@@ -268,9 +268,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         
         let deltaTime = now.timeIntervalSince(lastMovementUpdateTimestamp)
         
-        // Get calibration to pass to movement update
-        let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
-        cameraController.updateMovement(deltaTime: deltaTime, commonUpCalibration: commonUpCalibration)
+        cameraController.updateMovement(deltaTime: deltaTime)
     }
 #endif
 

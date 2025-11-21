@@ -21,56 +21,42 @@ class CameraController {
     let minPitch: Float = -Float.pi / 2 + 0.1 // Prevent gimbal lock
     let maxPitch: Float = Float.pi / 2 - 0.1
     
-    init(position: SIMD3<Float> = SIMD3<Float>(0, 0, 0), yaw: Float = 0, pitch: Float = 0) {
+    init(position: SIMD3<Float> = SIMD3<Float>(0, 0, 5), yaw: Float = 0, pitch: Float = 0) {
         self.position = position
         self.yaw = yaw
         self.pitch = pitch
     }
     
-    func updateMovement(deltaTime: TimeInterval, commonUpCalibration: matrix_float4x4) {
+    func updateMovement(deltaTime: TimeInterval) {
         guard moveForward || moveBackward || moveLeft || moveRight else { return }
         
         let speed = movementSpeed * Float(deltaTime)
         
-        // Calculate movement vectors using the SAME logic as the view matrix
-        // This ensures movement directions match what the camera sees in world space
-        
-        // Calculate forward vector from yaw only (for horizontal movement, ignore pitch)
-        // We want movement in the XZ plane
-        let forwardXZ = normalize(SIMD3<Float>(
-            sin(yaw),
-            0,
-            cos(yaw)
-        ))
-        
-        // Apply calibration to the forward vector to match world coordinate system
-        let forwardXZ4 = commonUpCalibration * SIMD4<Float>(forwardXZ.x, forwardXZ.y, forwardXZ.z, 0)
-        let calibratedForwardXZ = normalize(SIMD3<Float>(forwardXZ4.x, forwardXZ4.y, forwardXZ4.z))
-        
-        // Calculate right vector: perpendicular to forward in XZ plane
-        // After calibration, world up might not be (0,1,0), so we need to compute it
-        let worldUp4 = commonUpCalibration * SIMD4<Float>(0, 1, 0, 0)
-        let calibratedWorldUp = normalize(SIMD3<Float>(worldUp4.x, worldUp4.y, worldUp4.z))
-        
-        // Right vector is cross product of forward and up (gives perpendicular in XZ plane)
-        let right = normalize(cross(calibratedForwardXZ, calibratedWorldUp))
+        // Calculate forward vector for movement (XZ plane)
+        // Yaw 0 corresponds to looking down -Z
+        let forward = SIMD3<Float>(sin(yaw), 0, -cos(yaw))
+        let right = SIMD3<Float>(cos(yaw), 0, sin(yaw))
         
         var movement = SIMD3<Float>(0, 0, 0)
         
         if moveForward {
-            movement += calibratedForwardXZ * speed
+            movement += forward
         }
         if moveBackward {
-            movement -= calibratedForwardXZ * speed
+            movement -= forward
         }
         if moveRight {
-            movement += right * speed
+            movement += right
         }
         if moveLeft {
-            movement -= right * speed
+            movement -= right
         }
         
-        position += movement
+        // Normalize to ensure constant speed regardless of direction
+        if length_squared(movement) > 0 {
+            movement = normalize(movement) * speed
+            position += movement
+        }
     }
     
     func updateRotation(deltaYaw: Float, deltaPitch: Float) {
@@ -89,54 +75,36 @@ class CameraController {
         }
     }
     
-    func getViewMatrix(commonUpCalibration: matrix_float4x4) -> matrix_float4x4 {
-        // Use look-at construction which correctly handles:
-        // 1. Rotation around camera position (via translation component)
-        // 2. Pitch rotation around camera's local X axis (not world X axis)
-        //
-        // The look-at matrix naturally ensures all rotations happen around the camera
-        // because the translation accounts for camera position in the rotated coordinate system.
-        
-        // Calculate camera orientation from yaw and pitch
-        // This gives us the forward direction in world space before calibration
+    func getViewMatrix() -> matrix_float4x4 {
+        // Calculate forward vector
+        // Yaw 0 = -Z
         let forward = normalize(SIMD3<Float>(
             sin(yaw) * cos(pitch),
-            -sin(pitch),
-            cos(yaw) * cos(pitch)
+            sin(pitch),
+            -cos(yaw) * cos(pitch)
         ))
         
-        // Apply calibration to orientation vectors
-        // This incorporates calibration into the camera's coordinate system
-        let forward4 = commonUpCalibration * SIMD4<Float>(forward.x, forward.y, forward.z, 0)
-        let calibratedForward = normalize(SIMD3<Float>(forward4.x, forward4.y, forward4.z))
+        let worldUp = SIMD3<Float>(0, 1, 0)
         
-        // Get calibrated world up vector
-        let worldUp4 = commonUpCalibration * SIMD4<Float>(0, 1, 0, 0)
-        let calibratedWorldUp = normalize(SIMD3<Float>(worldUp4.x, worldUp4.y, worldUp4.z))
+        // Calculate camera coordinate system
+        let right = normalize(cross(forward, worldUp))
+        let up = normalize(cross(right, forward))
         
-        // Calculate camera's right and up vectors using cross products
-        // This naturally gives us the camera's local coordinate system
-        // Pitch rotation is implicitly around the right vector (camera's local X axis)
-        let right = normalize(cross(calibratedForward, calibratedWorldUp))
-        let up = normalize(cross(right, calibratedForward))
+        // Create LookAt matrix
+        // Camera space basis vectors
+        let zAxis = -forward // Backwards
+        let xAxis = right
+        let yAxis = up
         
-        // Build look-at view matrix
-        // The translation component (-dot(right,pos), -dot(up,pos), dot(forward,pos))
-        // correctly positions the camera in the rotated coordinate system.
-        // Since we're using calibrated vectors, the camera position is accounted for
-        // in the calibrated space, ensuring rotations happen around the camera.
-        let viewMatrix = matrix_float4x4(
+        return matrix_float4x4(
             columns: (
-                vector_float4(right.x, right.y, right.z, 0),
-                vector_float4(up.x, up.y, up.z, 0),
-                vector_float4(-calibratedForward.x, -calibratedForward.y, -calibratedForward.z, 0),
-                vector_float4(-dot(right, position), -dot(up, position), dot(calibratedForward, position), 1)
+                vector_float4(xAxis.x, xAxis.y, xAxis.z, 0),
+                vector_float4(yAxis.x, yAxis.y, yAxis.z, 0),
+                vector_float4(zAxis.x, zAxis.y, zAxis.z, 0),
+                vector_float4(-dot(xAxis, position), -dot(yAxis, position), -dot(zAxis, position), 1)
             )
         )
-        
-        return viewMatrix
     }
 }
 
 #endif // os(macOS)
-

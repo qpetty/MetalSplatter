@@ -114,8 +114,10 @@ class ControlledMTKView: MTKView {
         let deltaX = Float(currentLocation.x - lastMouseLocation.x)
         let deltaY = Float(currentLocation.y - lastMouseLocation.y)
         
-        // Invert Y because macOS coordinates are flipped (Y increases downward)
-        cameraController.updateRotation(deltaYaw: deltaX, deltaPitch: -deltaY)
+        // Standard FPS Look: Drag Down -> Look Down
+        // macOS Y increases Up. Drag Down -> deltaY < 0.
+        // Look Down -> Decrease Pitch -> deltaPitch < 0.
+        cameraController.updateRotation(deltaYaw: deltaX, deltaPitch: deltaY)
         
         lastMouseLocation = currentLocation
     }
@@ -135,8 +137,7 @@ class ControlledMTKView: MTKView {
         }
         
         // Use vertical scroll delta for pitch adjustment (looking up/down)
-        // Negative scrollDeltaY means scrolling up (should look up, decrease pitch)
-        // Positive scrollDeltaY means scrolling down (should look down, increase pitch)
+        // Scroll Down (Positive) -> Look Down (Decrease Pitch)
         let scrollDeltaY = Float(event.scrollingDeltaY)
         let scrollSensitivity: Float = 0.1 // radians per scroll unit
         
