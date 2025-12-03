@@ -139,7 +139,9 @@ class VisionSceneRenderer {
         switch model {
         case .gaussianSplat(let url):
             let splat = try makeSplatRenderer()
-            try await splat.read(from: url)
+            // Convert SPZ to PLY if needed
+            let loadURL = try SPZConverter.convertIfNeeded(url)
+            try await splat.read(from: loadURL)
             modelRenderer = splat
             // Center the model in world space
             if let splatRenderer = splat as? SplatRenderer {

@@ -136,7 +136,9 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                 sampleCount: metalKitView.sampleCount,
                                                 maxViewCount: 1,
                                                 maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try await splat.read(from: url)
+            // Convert SPZ to PLY if needed
+            let loadURL = try SPZConverter.convertIfNeeded(url)
+            try await splat.read(from: loadURL)
             
             // Only update if we still have the same model
             if case .gaussianSplat(let currentUrl) = model, currentUrl == url {
@@ -179,10 +181,12 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                     sampleCount: metalKitView.sampleCount,
                                                     maxViewCount: 1,
                                                     maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-                try await splat.read(from: url)
+                // Convert SPZ to PLY if needed
+                let loadURL = try SPZConverter.convertIfNeeded(url)
+                try await splat.read(from: loadURL)
                 modelRenderer = splat
                 
-                // Set up file monitoring for Gaussian splat files if enabled
+                // Set up file monitoring for Gaussian splat files if enabled (use original URL)
                 if enableFileMonitoring {
                     setupFileMonitor(for: url)
                 }

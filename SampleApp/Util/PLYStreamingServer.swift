@@ -4,21 +4,7 @@ import Foundation
 import Network
 import os
 
-// Swift wrapper for SPZ C functions
-@_silgen_name("spz_load_spz_from_file")
-func spz_load_spz_from_file(_ filename: UnsafePointer<CChar>) -> UnsafeMutableRawPointer?
-
-@_silgen_name("spz_save_splat_to_ply")
-func spz_save_splat_to_ply(_ cloud: UnsafeMutableRawPointer?, _ options: UnsafeMutableRawPointer?, _ outputPath: UnsafePointer<CChar>) -> Bool
-
-@_silgen_name("spz_gaussian_cloud_destroy")
-func spz_gaussian_cloud_destroy(_ cloud: UnsafeMutableRawPointer?)
-
-@_silgen_name("spz_pack_options_create")
-func spz_pack_options_create() -> UnsafeMutableRawPointer?
-
-@_silgen_name("spz_pack_options_destroy")
-func spz_pack_options_destroy(_ options: UnsafeMutableRawPointer?)
+// Note: SPZ C function bindings are defined in SPZConverter.swift
 
 class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "PLYStreamingServer")
