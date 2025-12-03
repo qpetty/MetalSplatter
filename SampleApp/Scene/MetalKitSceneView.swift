@@ -11,6 +11,7 @@ private typealias ViewRepresentable = UIViewRepresentable
 
 struct MetalKitSceneView: ViewRepresentable {
     var modelIdentifier: ModelIdentifier?
+    var flipYAxis: Bool = false
     @AppStorage("enableFileMonitoring") private var enableFileMonitoring = true
 
     class Coordinator {
@@ -49,6 +50,7 @@ struct MetalKitSceneView: ViewRepresentable {
             return metalKitView
         }
         renderer.enableFileMonitoring = enableFileMonitoring
+        renderer.flipYAxis = flipYAxis
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
@@ -95,6 +97,7 @@ struct MetalKitSceneView: ViewRepresentable {
     private func updateView(_ coordinator: Coordinator) {
         guard let renderer = coordinator.renderer else { return }
         renderer.enableFileMonitoring = enableFileMonitoring
+        renderer.flipYAxis = flipYAxis
         Task {
             do {
                 try await renderer.load(modelIdentifier)

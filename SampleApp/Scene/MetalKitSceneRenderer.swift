@@ -31,6 +31,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
+    var flipYAxis: Bool = false
 
     var drawableSize: CGSize = .zero
     
@@ -211,7 +212,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
-        let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        var commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        if flipYAxis {
+            commonUpCalibration = commonUpCalibration * matrix4x4_scale(1, -1, 1)
+        }
 
         let viewMatrix: matrix_float4x4
 #if os(macOS)

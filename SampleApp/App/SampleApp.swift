@@ -14,7 +14,7 @@ struct SampleApp: App {
 
 #if os(macOS)
         WindowGroup(for: ModelIdentifier.self) { modelIdentifier in
-            MetalKitSceneView(modelIdentifier: modelIdentifier.wrappedValue)
+            MacOSModelView(modelIdentifier: modelIdentifier.wrappedValue)
                 .navigationTitle(modelIdentifier.wrappedValue?.description ?? "No Model")
         }
 #endif // os(macOS)
@@ -370,3 +370,28 @@ private func distance(_ a: Point3D, _ b: Point3D) -> Float {
     simd_length(a.simd3 - b.simd3)
 }
 #endif // os(visionOS)
+
+#if os(macOS)
+struct MacOSModelView: View {
+    let modelIdentifier: ModelIdentifier?
+    @State private var flipYAxis = false
+    
+    var body: some View {
+        MetalKitSceneView(modelIdentifier: modelIdentifier, flipYAxis: flipYAxis)
+            .overlay(alignment: .bottomTrailing) {
+                Button(action: {
+                    flipYAxis.toggle()
+                }) {
+                    Image(systemName: "arrow.up.and.down")
+                        .imageScale(.large)
+                        .padding(8)
+                }
+                .buttonStyle(.borderless)
+                .background(Material.ultraThinMaterial)
+                .cornerRadius(8)
+                .padding()
+                .help("Flip Y Axis")
+            }
+    }
+}
+#endif
