@@ -5,6 +5,12 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @State private var isPickingFile = false
     @AppStorage("enableFileMonitoring") private var enableFileMonitoring = true
+    
+    // WebSocket streaming state (shared across platforms)
+    @StateObject private var wsClient = WebSocketStreamingClient()
+    @AppStorage("wsHostAddress") private var wsHostAddress = ""
+    @AppStorage("wsPort") private var wsPort = String(Constants.defaultWebSocketPort)
+    @State private var isWsStreamingMode = false
 
 #if os(visionOS)
     @StateObject private var streamingServer = PLYStreamingServer()
@@ -132,6 +138,11 @@ struct ContentView: View {
 #endif
 
         Spacer()
+        
+        // WebSocket Streaming Section
+        wsStreamingSection
+
+        Spacer()
 
 #if os(visionOS)
         Button("Start Streaming Mode") {
@@ -170,6 +181,143 @@ struct ContentView: View {
 #endif // os(visionOS)
     }
     
+    // MARK: - WebSocket Streaming Section
+    
+    @ViewBuilder
+    private var wsStreamingSection: some View {
+        VStack(spacing: 10) {
+            Text("WebSocket Streaming")
+                .font(.headline)
+            
+            if isWsStreamingMode {
+                wsStreamingActiveView
+            } else {
+                wsStreamingConnectView
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var wsStreamingConnectView: some View {
+        VStack(spacing: 8) {
+            HStack {
+                TextField("Host/IP", text: $wsHostAddress)
+                    .textFieldStyle(.roundedBorder)
+#if os(macOS)
+                    .frame(width: 150)
+#endif
+                
+                TextField("Port", text: $wsPort)
+                    .textFieldStyle(.roundedBorder)
+#if os(macOS)
+                    .frame(width: 60)
+#endif
+            }
+            
+            Button("Connect to Stream") {
+                startWsStreaming()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(wsHostAddress.isEmpty)
+#if os(visionOS)
+            .disabled(immersiveSpaceIsShown)
+#endif
+        }
+    }
+    
+    @ViewBuilder
+    private var wsStreamingActiveView: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Circle()
+                    .fill(wsClient.isConnected ? Color.green : Color.red)
+                    .frame(width: 10, height: 10)
+                Text(wsClient.isConnected ? "Connected" : "Disconnected")
+                    .foregroundColor(wsClient.isConnected ? .green : .red)
+            }
+            
+            if wsClient.isConnected {
+                Text("Server: \(wsClient.serverInfo?.format.uppercased() ?? "unknown") format")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text("Frames: \(wsClient.framesReceived) | Received: \(formatBytes(wsClient.bytesReceived))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack {
+                    Button(wsClient.isPaused ? "Resume" : "Pause") {
+                        if wsClient.isPaused {
+                            wsClient.resume()
+                        } else {
+                            wsClient.pause()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            
+            if let error = wsClient.connectionError {
+                Text("Error: \(error)")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            
+            Button("Disconnect") {
+                stopWsStreaming()
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+        }
+    }
+    
+    private func startWsStreaming() {
+        let port = Int(wsPort) ?? Constants.defaultWebSocketPort
+        
+        // Set up frame received handler
+        wsClient.onFrameReceived = { frame in
+            // Post notification with frame data
+            NotificationCenter.default.post(
+                name: Constants.wsFrameReceivedNotificationName,
+                object: nil,
+                userInfo: ["frame": frame]
+            )
+        }
+        
+        wsClient.connect(host: wsHostAddress, port: port)
+        isWsStreamingMode = true
+        
+        // Open window/immersive space for streaming
+        openWindow(value: ModelIdentifier.streaming)
+    }
+    
+    private func stopWsStreaming() {
+        wsClient.disconnect()
+        isWsStreamingMode = false
+#if os(visionOS)
+        if immersiveSpaceIsShown {
+            Task {
+                await dismissImmersiveSpace()
+                immersiveSpaceIsShown = false
+            }
+        }
+#endif
+    }
+    
+    private func formatBytes(_ bytes: Int) -> String {
+        if bytes < 1024 {
+            return "\(bytes) B"
+        } else if bytes < 1024 * 1024 {
+            return String(format: "%.1f KB", Double(bytes) / 1024)
+        } else {
+            return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+        }
+    }
+
 #if os(visionOS)
     @ViewBuilder
     private var streamingModeView: some View {

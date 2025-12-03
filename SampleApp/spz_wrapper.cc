@@ -46,6 +46,17 @@ SpzGaussianCloudHandle spz_load_spz_from_file(const char* filename) {
     }
 }
 
+SpzGaussianCloudHandle spz_load_spz_from_memory(const uint8_t* data, int32_t size) {
+    try {
+        UnpackOptions opts;
+        opts.to = CoordinateSystem::UNSPECIFIED; // keep original
+        GaussianCloud cloud = loadSpz(data, size, opts);
+        return reinterpret_cast<SpzGaussianCloudHandle>(new GaussianCloud(std::move(cloud)));
+    } catch (const std::exception& e) {
+        return nullptr;
+    }
+}
+
 bool spz_save_splat_to_ply(
     SpzGaussianCloudHandle cloud,
     SpzPackOptionsHandle   options,

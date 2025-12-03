@@ -73,6 +73,9 @@ class VisionSceneRenderer {
         }
     }
 
+    // WebSocket streaming observer
+    private var wsFrameObserver: NSObjectProtocol?
+    
     init(_ layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
@@ -84,10 +87,22 @@ class VisionSceneRenderer {
         NotificationCenter.default.addObserver(forName: Constants.plyReceivedNotificationName, object: nil, queue: nil) { [weak self] notification in
             self?.handlePLYReceived(notification)
         }
+        
+        // Listen for WebSocket frame notifications
+        wsFrameObserver = NotificationCenter.default.addObserver(
+            forName: Constants.wsFrameReceivedNotificationName,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleWSFrameReceived(notification)
+        }
     }
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+        if let observer = wsFrameObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func handlePLYReceived(_ notification: Notification) {
@@ -115,6 +130,44 @@ class VisionSceneRenderer {
                 }
             } catch {
                 Self.log.error("Failed to reload PLY: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func handleWSFrameReceived(_ notification: Notification) {
+        guard let frame = notification.userInfo?["frame"] as? WebSocketStreamingClient.Frame else { return }
+        
+        Task {
+            do {
+                Self.log.info("Processing WebSocket frame \(frame.sequenceId): \(frame.data.count) bytes")
+                
+                // Process frame data into points
+                let points = try await WebSocketStreamingClient.processFrame(frame)
+                
+                // Create or update the splat renderer
+                if let splatRenderer = self.modelRenderer as? SplatRenderer {
+                    // Create replacement renderer with new data
+                    let replacementRenderer = try self.makeSplatRenderer()
+                    replacementRenderer.highQualityDepth = splatRenderer.highQualityDepth
+                    replacementRenderer.clearColor = splatRenderer.clearColor
+                    replacementRenderer.onSortStart = splatRenderer.onSortStart
+                    replacementRenderer.onSortComplete = splatRenderer.onSortComplete
+                    
+                    try replacementRenderer.add(points)
+                    
+                    Self.log.info("Switching to replacement renderer with \(points.count) points from WebSocket frame")
+                    self.modelRenderer = replacementRenderer
+                    self.modelRadius = replacementRenderer.modelRadius
+                } else if case .streaming = self.model {
+                    // Create new splat renderer for streaming mode
+                    let splat = try self.makeSplatRenderer()
+                    try splat.add(points)
+                    self.modelRenderer = splat
+                    self.modelRadius = splat.modelRadius
+                    Self.log.info("Created new renderer with \(points.count) points from WebSocket frame")
+                }
+            } catch {
+                Self.log.error("Failed to process WebSocket frame: \(error.localizedDescription)")
             }
         }
     }

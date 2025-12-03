@@ -28,6 +28,9 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     private var fileMonitorSource: DispatchSourceFileSystemObject?
     private var fileMonitorDescriptor: Int32?
     private var reloadWorkItem: DispatchWorkItem?
+    
+    // WebSocket streaming observer
+    private var wsFrameObserver: NSObjectProtocol?
 
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
@@ -49,10 +52,24 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float
         metalKitView.sampleCount = 1
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        
+        super.init()
+        
+        // Listen for WebSocket frame notifications
+        wsFrameObserver = NotificationCenter.default.addObserver(
+            forName: Constants.wsFrameReceivedNotificationName,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleWSFrameReceived(notification)
+        }
     }
     
     deinit {
         tearDownFileMonitor()
+        if let observer = wsFrameObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func setupFileMonitor(for url: URL) {
@@ -159,6 +176,44 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         } else {
             // Use normal reader for PLY and other formats
             try await splat.read(from: url)
+        }
+    }
+    
+    // MARK: - WebSocket Streaming
+    
+    private func handleWSFrameReceived(_ notification: Notification) {
+        guard let frame = notification.userInfo?["frame"] as? WebSocketStreamingClient.Frame else { return }
+        
+        Task {
+            do {
+                Self.log.info("Processing WebSocket frame \(frame.sequenceId): \(frame.data.count) bytes")
+                
+                // Process frame data into points
+                let points = try await WebSocketStreamingClient.processFrame(frame)
+                
+                // Create or update the splat renderer
+                if let splatRenderer = self.modelRenderer as? SplatRenderer {
+                    // Clear and replace existing splats
+                    splatRenderer.clear()
+                    try splatRenderer.add(points)
+                    Self.log.info("Updated renderer with \(points.count) points from WebSocket frame")
+                } else if case .streaming = self.model {
+                    // Create new splat renderer for streaming mode
+                    let splat = try await SplatRenderer(
+                        device: device,
+                        colorFormat: metalKitView.colorPixelFormat,
+                        depthFormat: metalKitView.depthStencilPixelFormat,
+                        sampleCount: metalKitView.sampleCount,
+                        maxViewCount: 1,
+                        maxSimultaneousRenders: Constants.maxSimultaneousRenders
+                    )
+                    try splat.add(points)
+                    self.modelRenderer = splat
+                    Self.log.info("Created new renderer with \(points.count) points from WebSocket frame")
+                }
+            } catch {
+                Self.log.error("Failed to process WebSocket frame: \(error.localizedDescription)")
+            }
         }
     }
 

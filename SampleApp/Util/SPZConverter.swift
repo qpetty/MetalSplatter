@@ -1,4 +1,4 @@
-#if os(visionOS) || os(macOS)
+#if os(visionOS) || os(macOS) || os(iOS)
 
 import Foundation
 import os
@@ -8,6 +8,9 @@ import SplatIO
 // Swift wrapper for SPZ C functions
 @_silgen_name("spz_load_spz_from_file")
 func spz_load_spz_from_file(_ filename: UnsafePointer<CChar>) -> UnsafeMutableRawPointer?
+
+@_silgen_name("spz_load_spz_from_memory")
+func spz_load_spz_from_memory(_ data: UnsafePointer<UInt8>, _ size: Int32) -> UnsafeMutableRawPointer?
 
 @_silgen_name("spz_gaussian_cloud_destroy")
 func spz_gaussian_cloud_destroy(_ cloud: UnsafeMutableRawPointer?)
@@ -79,6 +82,35 @@ class SPZLoader {
             throw LoadError.failedToLoadSPZ(url.path)
         }
         
+        let duration = Date().timeIntervalSince(startTime)
+        return try extractPointsFromCloud(cloud, source: url.lastPathComponent, loadDuration: duration)
+    }
+    
+    /// Load SPZ from memory buffer directly into SplatScenePoint array
+    /// - Parameter data: The SPZ data in memory
+    /// - Returns: Array of SplatScenePoint objects
+    static func loadPoints(from data: Data) throws -> [SplatScenePoint] {
+        let startTime = Date()
+        log.info("Loading SPZ from memory: \(data.count) bytes")
+        
+        // Load SPZ from memory
+        let cloud: UnsafeMutableRawPointer? = data.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return nil
+            }
+            return spz_load_spz_from_memory(baseAddress, Int32(data.count))
+        }
+        
+        guard let cloud = cloud else {
+            throw LoadError.failedToLoadSPZ("memory buffer (\(data.count) bytes)")
+        }
+        
+        let duration = Date().timeIntervalSince(startTime)
+        return try extractPointsFromCloud(cloud, source: "memory", loadDuration: duration)
+    }
+    
+    /// Extract SplatScenePoints from a loaded GaussianCloud
+    private static func extractPointsFromCloud(_ cloud: UnsafeMutableRawPointer, source: String, loadDuration: TimeInterval) throws -> [SplatScenePoint] {
         defer {
             spz_gaussian_cloud_destroy(cloud)
         }
@@ -87,7 +119,7 @@ class SPZLoader {
         let shDegree = Int(spz_gaussian_cloud_sh_degree(cloud))
         
         guard numPoints > 0 else {
-            log.warning("SPZ file contains no points")
+            log.warning("SPZ data contains no points")
             return []
         }
         
@@ -186,8 +218,8 @@ class SPZLoader {
             points.append(point)
         }
         
-        let duration = Date().timeIntervalSince(startTime)
-        log.info("SPZ loaded directly in \(String(format: "%.3f", duration))s (\(numPoints) points)")
+        let totalDuration = loadDuration
+        log.info("SPZ loaded from \(source) in \(String(format: "%.3f", totalDuration))s (\(numPoints) points)")
         
         return points
     }
@@ -213,4 +245,4 @@ class SPZSceneReader: SplatSceneReader {
     }
 }
 
-#endif // os(visionOS) || os(macOS)
+#endif // os(visionOS) || os(macOS) || os(iOS)

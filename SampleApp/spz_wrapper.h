@@ -45,6 +45,10 @@ void                 spz_pack_options_set_from_coord(
 // Returns NULL on failure (check last error if needed)
 SpzGaussianCloudHandle spz_load_spz_from_file(const char* filename);
 
+// Load .spz from memory buffer → GaussianCloud
+// Returns NULL on failure
+SpzGaussianCloudHandle spz_load_spz_from_memory(const uint8_t* data, int32_t size);
+
 // Save GaussianCloud → .ply file using given options
 // Returns true on success
 bool spz_save_splat_to_ply(

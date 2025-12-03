@@ -13,6 +13,7 @@
 		5A72D48B2ECE5290004C5D0E /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 5A72D48A2ECE5290004C5D0E /* libz.tbd */; };
 		5A72D48E2ECE5685004C5D0E /* spz_wrapper.cc in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D48D2ECE567D004C5D0E /* spz_wrapper.cc */; };
 		5A72D48F2ECF8000004C5D0E /* SPZConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D4902ECF8000004C5D0E /* SPZConverter.swift */; };
+		5A72D4912ED0A000004C5D0E /* WebSocketStreamingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A72D4922ED0A000004C5D0E /* WebSocketStreamingClient.swift */; };
 		610347D92B46864500693CE3 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp.swift */; };
 		610347DA2B46874500693CE3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
 		610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */; };
@@ -54,6 +55,7 @@
 		61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MatrixMathUtil.swift; sourceTree = "<group>"; };
 		61791DE02B4154FB00302B58 /* PLYStreamingServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PLYStreamingServer.swift; sourceTree = "<group>"; };
 		5A72D4902ECF8000004C5D0E /* SPZConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPZConverter.swift; sourceTree = "<group>"; };
+		5A72D4922ED0A000004C5D0E /* WebSocketStreamingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamingClient.swift; sourceTree = "<group>"; };
 		61791DF62B41551F00302B57 /* SampleApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SampleApp.swift; sourceTree = "<group>"; };
 		61791DF72B41551F00302B57 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		61791DF82B41551F00302B57 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -128,6 +130,7 @@
 				61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */,
 				61791DE02B4154FB00302B58 /* PLYStreamingServer.swift */,
 				5A72D4902ECF8000004C5D0E /* SPZConverter.swift */,
+				5A72D4922ED0A000004C5D0E /* WebSocketStreamingClient.swift */,
 			);
 			path = Util;
 			sourceTree = "<group>";
@@ -259,6 +262,7 @@
 				61791DEA2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */,
 				61791DEB2B4154FB00302B58 /* PLYStreamingServer.swift in Sources */,
 				5A72D48F2ECF8000004C5D0E /* SPZConverter.swift in Sources */,
+				5A72D4912ED0A000004C5D0E /* WebSocketStreamingClient.swift in Sources */,
 				610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */,
 				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,

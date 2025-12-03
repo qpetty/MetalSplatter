@@ -11,5 +11,9 @@ enum Constants {
     static let modelCenterZ: Float = -8
     
     static let plyReceivedNotificationName = Notification.Name("PLYReceivedNotification")
+    static let wsFrameReceivedNotificationName = Notification.Name("WSFrameReceivedNotification")
+    
+    // Default WebSocket streaming port
+    static let defaultWebSocketPort = 8765
 }
 
