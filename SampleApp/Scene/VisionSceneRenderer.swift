@@ -139,9 +139,8 @@ class VisionSceneRenderer {
         switch model {
         case .gaussianSplat(let url):
             let splat = try makeSplatRenderer()
-            // Convert SPZ to PLY if needed
-            let loadURL = try SPZConverter.convertIfNeeded(url)
-            try await splat.read(from: loadURL)
+            // Load directly from SPZ or use normal read for other formats
+            try await loadSplatData(to: splat, from: url)
             modelRenderer = splat
             // Center the model in world space
             if let splatRenderer = splat as? SplatRenderer {
@@ -172,6 +171,18 @@ class VisionSceneRenderer {
                           sampleCount: 1,
                           maxViewCount: layerRenderer.properties.viewCount,
                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+    }
+    
+    /// Load splat data from URL, using direct loading for SPZ files
+    private func loadSplatData(to splat: SplatRenderer, from url: URL) async throws {
+        if SPZLoader.isSPZFile(url) {
+            // Load SPZ directly
+            let points = try SPZLoader.loadPoints(from: url)
+            try splat.add(points)
+        } else {
+            // Use normal reader for PLY and other formats
+            try await splat.read(from: url)
+        }
     }
     
     // Force reload even if model URL is the same (for streaming updates)

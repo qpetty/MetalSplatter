@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +54,30 @@ bool spz_save_splat_to_ply(
 
 // Clean up the cloud when done
 void spz_gaussian_cloud_destroy(SpzGaussianCloudHandle cloud);
+
+// === Accessors for GaussianCloud data ===
+
+// Get number of points in the cloud
+int32_t spz_gaussian_cloud_num_points(SpzGaussianCloudHandle cloud);
+
+// Get SH degree
+int32_t spz_gaussian_cloud_sh_degree(SpzGaussianCloudHandle cloud);
+
+// Get raw data pointers (data is owned by the cloud, do not free)
+// Positions: 3 floats per point (x, y, z)
+const float* spz_gaussian_cloud_positions(SpzGaussianCloudHandle cloud);
+// Scales: 3 floats per point (log scale)
+const float* spz_gaussian_cloud_scales(SpzGaussianCloudHandle cloud);
+// Rotations: 4 floats per point (quaternion: x, y, z, w)
+const float* spz_gaussian_cloud_rotations(SpzGaussianCloudHandle cloud);
+// Alphas: 1 float per point (pre-sigmoid)
+const float* spz_gaussian_cloud_alphas(SpzGaussianCloudHandle cloud);
+// Colors: 3 floats per point (SH DC component)
+const float* spz_gaussian_cloud_colors(SpzGaussianCloudHandle cloud);
+// SH: variable floats per point depending on shDegree
+const float* spz_gaussian_cloud_sh(SpzGaussianCloudHandle cloud);
+// Size of SH array
+size_t spz_gaussian_cloud_sh_count(SpzGaussianCloudHandle cloud);
 
 // Optional: Get last error message (useful for debugging)
 const char* spz_get_last_error(void);

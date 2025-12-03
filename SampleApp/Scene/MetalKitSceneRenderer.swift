@@ -136,9 +136,8 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                 sampleCount: metalKitView.sampleCount,
                                                 maxViewCount: 1,
                                                 maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            // Convert SPZ to PLY if needed
-            let loadURL = try SPZConverter.convertIfNeeded(url)
-            try await splat.read(from: loadURL)
+            // Load directly from SPZ or use normal read for other formats
+            try await loadSplatData(to: splat, from: url)
             
             // Only update if we still have the same model
             if case .gaussianSplat(let currentUrl) = model, currentUrl == url {
@@ -148,6 +147,18 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         } catch {
             Self.log.error("Failed to reload model from \(url.path): \(error.localizedDescription)")
             // Keep the old model renderer intact on error
+        }
+    }
+    
+    /// Load splat data from URL, using direct loading for SPZ files
+    private func loadSplatData(to splat: SplatRenderer, from url: URL) async throws {
+        if SPZLoader.isSPZFile(url) {
+            // Load SPZ directly
+            let points = try SPZLoader.loadPoints(from: url)
+            try splat.add(points)
+        } else {
+            // Use normal reader for PLY and other formats
+            try await splat.read(from: url)
         }
     }
 
@@ -181,12 +192,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                     sampleCount: metalKitView.sampleCount,
                                                     maxViewCount: 1,
                                                     maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-                // Convert SPZ to PLY if needed
-                let loadURL = try SPZConverter.convertIfNeeded(url)
-                try await splat.read(from: loadURL)
+                // Load directly from SPZ or use normal read for other formats
+                try await loadSplatData(to: splat, from: url)
                 modelRenderer = splat
                 
-                // Set up file monitoring for Gaussian splat files if enabled (use original URL)
+                // Set up file monitoring for Gaussian splat files if enabled
                 if enableFileMonitoring {
                     setupFileMonitor(for: url)
                 }

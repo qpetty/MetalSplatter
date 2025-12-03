@@ -67,6 +67,57 @@ void spz_gaussian_cloud_destroy(SpzGaussianCloudHandle cloud) {
     delete reinterpret_cast<GaussianCloud*>(cloud);
 }
 
+int32_t spz_gaussian_cloud_num_points(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return 0;
+    return reinterpret_cast<const GaussianCloud*>(cloud)->numPoints;
+}
+
+int32_t spz_gaussian_cloud_sh_degree(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return 0;
+    return reinterpret_cast<const GaussianCloud*>(cloud)->shDegree;
+}
+
+const float* spz_gaussian_cloud_positions(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.positions.empty() ? nullptr : c.positions.data();
+}
+
+const float* spz_gaussian_cloud_scales(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.scales.empty() ? nullptr : c.scales.data();
+}
+
+const float* spz_gaussian_cloud_rotations(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.rotations.empty() ? nullptr : c.rotations.data();
+}
+
+const float* spz_gaussian_cloud_alphas(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.alphas.empty() ? nullptr : c.alphas.data();
+}
+
+const float* spz_gaussian_cloud_colors(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.colors.empty() ? nullptr : c.colors.data();
+}
+
+const float* spz_gaussian_cloud_sh(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return nullptr;
+    const auto& c = *reinterpret_cast<const GaussianCloud*>(cloud);
+    return c.sh.empty() ? nullptr : c.sh.data();
+}
+
+size_t spz_gaussian_cloud_sh_count(SpzGaussianCloudHandle cloud) {
+    if (!cloud) return 0;
+    return reinterpret_cast<const GaussianCloud*>(cloud)->sh.size();
+}
+
 const char* spz_get_last_error(void) {
     // Optional: implement thread-local last error storage
     return "No error";
