@@ -37,7 +37,7 @@ void spz_pack_options_set_from_coord(SpzPackOptionsHandle opts, SpzCoordinateSys
 SpzGaussianCloudHandle spz_load_spz_from_file(const char* filename) {
     try {
         UnpackOptions opts;
-        opts.to = CoordinateSystem::UNSPECIFIED; // keep original
+        opts.to = CoordinateSystem::RDF; // opencv, colmap
         GaussianCloud cloud = loadSpz(std::string(filename), opts);
         return reinterpret_cast<SpzGaussianCloudHandle>(new GaussianCloud(std::move(cloud)));
     } catch (const std::exception& e) {
@@ -49,7 +49,7 @@ SpzGaussianCloudHandle spz_load_spz_from_file(const char* filename) {
 SpzGaussianCloudHandle spz_load_spz_from_memory(const uint8_t* data, int32_t size) {
     try {
         UnpackOptions opts;
-        opts.to = CoordinateSystem::UNSPECIFIED; // keep original
+        opts.to = CoordinateSystem::RDF; // opencv, colmap
         GaussianCloud cloud = loadSpz(data, size, opts);
         return reinterpret_cast<SpzGaussianCloudHandle>(new GaussianCloud(std::move(cloud)));
     } catch (const std::exception& e) {
