@@ -629,7 +629,7 @@ class PLYStreamingServer: NSObject, ObservableObject, NetServiceDelegate {
         
         // Load SPZ file
         let loadStartTime = Date()
-        let cloud: UnsafeMutableRawPointer? = spzPath.withCString { spzPathPtr in
+        let cloud: SpzGaussianCloudHandle? = spzPath.withCString { spzPathPtr in
             return spz_load_spz_from_file(spzPathPtr)
         }
         let loadDuration = Date().timeIntervalSince(loadStartTime)

@@ -5,43 +5,7 @@ import os
 import simd
 import SplatIO
 
-// Swift wrapper for SPZ C functions
-@_silgen_name("spz_load_spz_from_file")
-func spz_load_spz_from_file(_ filename: UnsafePointer<CChar>) -> UnsafeMutableRawPointer?
-
-@_silgen_name("spz_load_spz_from_memory")
-func spz_load_spz_from_memory(_ data: UnsafePointer<UInt8>, _ size: Int32) -> UnsafeMutableRawPointer?
-
-@_silgen_name("spz_gaussian_cloud_destroy")
-func spz_gaussian_cloud_destroy(_ cloud: UnsafeMutableRawPointer?)
-
-// Accessors for GaussianCloud data
-@_silgen_name("spz_gaussian_cloud_num_points")
-func spz_gaussian_cloud_num_points(_ cloud: UnsafeMutableRawPointer?) -> Int32
-
-@_silgen_name("spz_gaussian_cloud_sh_degree")
-func spz_gaussian_cloud_sh_degree(_ cloud: UnsafeMutableRawPointer?) -> Int32
-
-@_silgen_name("spz_gaussian_cloud_positions")
-func spz_gaussian_cloud_positions(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_scales")
-func spz_gaussian_cloud_scales(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_rotations")
-func spz_gaussian_cloud_rotations(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_alphas")
-func spz_gaussian_cloud_alphas(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_colors")
-func spz_gaussian_cloud_colors(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_sh")
-func spz_gaussian_cloud_sh(_ cloud: UnsafeMutableRawPointer?) -> UnsafePointer<Float>?
-
-@_silgen_name("spz_gaussian_cloud_sh_count")
-func spz_gaussian_cloud_sh_count(_ cloud: UnsafeMutableRawPointer?) -> Int
+// SPZ C functions are exposed via the bridging header (MetalSplatter-Bridging-Header.h)
 
 /// Helper class for loading SPZ files directly
 class SPZLoader {
@@ -74,7 +38,7 @@ class SPZLoader {
         log.info("Loading SPZ file directly: \(url.lastPathComponent)")
         
         // Load SPZ file
-        let cloud: UnsafeMutableRawPointer? = url.path.withCString { spzPathPtr in
+        let cloud: SpzGaussianCloudHandle? = url.path.withCString { spzPathPtr in
             return spz_load_spz_from_file(spzPathPtr)
         }
         
@@ -94,7 +58,7 @@ class SPZLoader {
         log.info("Loading SPZ from memory: \(data.count) bytes")
         
         // Load SPZ from memory
-        let cloud: UnsafeMutableRawPointer? = data.withUnsafeBytes { buffer in
+        let cloud: SpzGaussianCloudHandle? = data.withUnsafeBytes { buffer in
             guard let baseAddress = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                 return nil
             }
@@ -110,7 +74,7 @@ class SPZLoader {
     }
     
     /// Extract SplatScenePoints from a loaded GaussianCloud
-    private static func extractPointsFromCloud(_ cloud: UnsafeMutableRawPointer, source: String, loadDuration: TimeInterval) throws -> [SplatScenePoint] {
+    private static func extractPointsFromCloud(_ cloud: SpzGaussianCloudHandle, source: String, loadDuration: TimeInterval) throws -> [SplatScenePoint] {
         defer {
             spz_gaussian_cloud_destroy(cloud)
         }
