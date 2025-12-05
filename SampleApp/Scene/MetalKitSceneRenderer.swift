@@ -184,32 +184,40 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     private func handleWSFrameReceived(_ notification: Notification) {
         guard let frame = notification.userInfo?["frame"] as? WebSocketStreamingClient.Frame else { return }
         
-        Task {
+        // Capture device properties needed for creating the renderer on a background thread
+        let device = self.device
+        let colorFormat = self.metalKitView.colorPixelFormat
+        let depthFormat = self.metalKitView.depthStencilPixelFormat
+        let sampleCount = self.metalKitView.sampleCount
+        
+        Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 Self.log.info("Processing WebSocket frame \(frame.sequenceId): \(frame.data.count) bytes")
                 
-                // Process frame data into points
+                // Process frame data into points on background thread
                 let points = try await WebSocketStreamingClient.processFrame(frame)
                 
-                // Create or update the splat renderer
-                if let splatRenderer = self.modelRenderer as? SplatRenderer {
-                    // Clear and replace existing splats
-                    splatRenderer.clear()
-                    try splatRenderer.add(points)
-                    Self.log.info("Updated renderer with \(points.count) points from WebSocket frame")
-                } else if case .streaming = self.model {
-                    // Create new splat renderer for streaming mode
-                    let splat = try await SplatRenderer(
-                        device: device,
-                        colorFormat: metalKitView.colorPixelFormat,
-                        depthFormat: metalKitView.depthStencilPixelFormat,
-                        sampleCount: metalKitView.sampleCount,
-                        maxViewCount: 1,
-                        maxSimultaneousRenders: Constants.maxSimultaneousRenders
-                    )
-                    try splat.add(points)
-                    self.modelRenderer = splat
-                    Self.log.info("Created new renderer with \(points.count) points from WebSocket frame")
+                // Create and populate a new renderer entirely on the background thread
+                let newRenderer = try SplatRenderer(
+                    device: device,
+                    colorFormat: colorFormat,
+                    depthFormat: depthFormat,
+                    sampleCount: sampleCount,
+                    maxViewCount: 1,
+                    maxSimultaneousRenders: Constants.maxSimultaneousRenders
+                )
+                try newRenderer.add(points)
+                
+                Self.log.info("Prepared new renderer with \(points.count) points from WebSocket frame")
+                
+                // Only swap the renderer reference on the main thread
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    // Atomic swap - old renderer will be released after in-flight renders complete
+                    if case .streaming = self.model {
+                        self.modelRenderer = newRenderer
+                        Self.log.info("Swapped to new renderer with \(points.count) points")
+                    }
                 }
             } catch {
                 Self.log.error("Failed to process WebSocket frame: \(error.localizedDescription)")
